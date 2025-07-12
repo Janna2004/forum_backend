@@ -47,9 +47,34 @@ python manage.py migrate
 
 ### 5. 启动服务
 
+> **注意：如需使用WebSocket（如WebRTC），必须用ASGI服务器启动，不能用`runserver`！**
+
+开发环境推荐（requirement里已包含该包）：
+
+```bash
+python -m uvicorn config.asgi:application --host 0.0.0.0 --port 8000
+```
+
+或（requirements里未包含，需要自行下载）
+
+```bash
+python -m daphne config.asgi:application
+```
+
+如只需普通REST API，可用：
+
 ```bash
 python manage.py runserver
 ```
+
+但此时WebSocket接口不可用。
+
+#### 常见报错与解决
+
+- **django.core.exceptions.AppRegistryNotReady: Apps aren't loaded yet.**
+  - 解决：确保`config/asgi.py`中`os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')`在所有Django相关导入之前。
+- **WebSocket无法连接/404**
+  - 解决：必须用`uvicorn`或`daphne`启动，`runserver`不支持WebSocket。
 
 ## webSocet接口使用方法
 

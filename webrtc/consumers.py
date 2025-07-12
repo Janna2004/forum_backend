@@ -25,29 +25,16 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         """建立WebSocket连接"""
         try:
-            # 获取用户信息
-            self.user = await self.get_user()
-            if not self.user or not self.user.is_authenticated:
-                await self.close(code=4001)
-                return
-            
-            # 生成会话ID
+            # 允许匿名连接，不校验用户
+            self.user = await self.get_user() if hasattr(self, 'get_user') else None
             self.session_id = str(uuid.uuid4())
-            
-            # 接受连接
             await self.accept()
-            
-            # 发送连接成功消息
             await self.send(text_data=json.dumps({
                 'type': 'connection_established',
                 'session_id': self.session_id,
                 'message': 'WebRTC连接已建立'
             }))
-            
-            logger.info(f"WebRTC连接已建立: {self.user.username} - {self.session_id}")
-            
         except Exception as e:
-            logger.error(f"WebRTC连接失败: {str(e)}")
             await self.close(code=4000)
     
     async def disconnect(self, close_code):
