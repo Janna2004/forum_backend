@@ -1,12 +1,14 @@
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
+from .models import Resume, WorkExperience, ProjectExperience, EducationExperience, CustomSection
 import json
 from django.contrib.auth import authenticate
 import jwt
 from django.conf import settings
 from datetime import datetime, timedelta
+from django.views.decorators.http import require_http_methods
 
 # Create your views here.
 
@@ -67,3 +69,461 @@ def jwt_required(view_func):
             return JsonResponse({'error': 'JWT无效或已过期'}, status=401)
         return view_func(request, *args, **kwargs)
     return wrapper
+
+@csrf_exempt
+@jwt_required
+def get_user_profile(request):
+    """获取用户个人信息"""
+    if request.method != 'GET':
+        return JsonResponse({'error': '仅支持GET请求'}, status=405)
+    try:
+        user = request.user
+        profile_data = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'phone': user.phone,
+            'avatar': user.avatar,
+            'date_joined': user.date_joined,
+            'last_login': user.last_login
+        }
+        
+        # 获取简历信息
+        try:
+            resume = user.resume
+            profile_data['resume'] = {
+                'id': resume.id,
+                'name': resume.name,
+                'age': resume.age,
+                'graduation_date': resume.graduation_date.isoformat() if resume.graduation_date else None,
+                'education_level': resume.education_level,
+                'expected_position': resume.expected_position,
+                'created_at': resume.created_at.isoformat(),
+                'updated_at': resume.updated_at.isoformat()
+            }
+        except Resume.DoesNotExist:
+            profile_data['resume'] = None
+        
+        return JsonResponse({
+            'success': True,
+            'profile': profile_data
+        })
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@csrf_exempt
+@jwt_required
+def update_user_profile(request):
+    """更新用户个人信息"""
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持POST请求'}, status=405)
+    try:
+        user = request.user
+        data = json.loads(request.body.decode())
+        
+        # 更新基本信息
+        if 'email' in data:
+            user.email = data['email']
+        if 'first_name' in data:
+            user.first_name = data['first_name']
+        if 'last_name' in data:
+            user.last_name = data['last_name']
+        if 'phone' in data:
+            user.phone = data['phone']
+        if 'avatar' in data:
+            user.avatar = data['avatar']
+        
+        user.save()
+        
+        return JsonResponse({
+            'success': True,
+            'msg': '个人信息更新成功'
+        })
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@csrf_exempt
+@jwt_required
+def get_resume(request):
+    """获取用户简历详细信息"""
+    if request.method != 'GET':
+        return JsonResponse({'error': '仅支持GET请求'}, status=405)
+    try:
+        user = request.user
+        
+        try:
+            resume = user.resume
+        except Resume.DoesNotExist:
+            return JsonResponse({
+                'success': True,
+                'resume': None,
+                'msg': '简历不存在'
+            })
+        
+        # 构建简历数据
+        resume_data = {
+            'id': resume.id,
+            'name': resume.name,
+            'age': resume.age,
+            'graduation_date': resume.graduation_date.isoformat() if resume.graduation_date else None,
+            'education_level': resume.education_level,
+            'expected_position': resume.expected_position,
+            'created_at': resume.created_at.isoformat(),
+            'updated_at': resume.updated_at.isoformat(),
+            
+            # 工作经历
+            'work_experiences': [
+                {
+                    'id': exp.id,
+                    'start_date': exp.start_date.isoformat(),
+                    'end_date': exp.end_date.isoformat() if exp.end_date else None,
+                    'company_name': exp.company_name,
+                    'department': exp.department,
+                    'position': exp.position,
+                    'work_content': exp.work_content,
+                    'is_internship': exp.is_internship
+                }
+                for exp in resume.work_experiences.all()
+            ],
+            
+            # 项目经历
+            'project_experiences': [
+                {
+                    'id': exp.id,
+                    'start_date': exp.start_date.isoformat(),
+                    'end_date': exp.end_date.isoformat() if exp.end_date else None,
+                    'project_name': exp.project_name,
+                    'project_role': exp.project_role,
+                    'project_link': exp.project_link,
+                    'project_content': exp.project_content
+                }
+                for exp in resume.project_experiences.all()
+            ],
+            
+            # 教育经历
+            'education_experiences': [
+                {
+                    'id': exp.id,
+                    'start_date': exp.start_date.isoformat(),
+                    'end_date': exp.end_date.isoformat() if exp.end_date else None,
+                    'school_name': exp.school_name,
+                    'education_level': exp.education_level,
+                    'major': exp.major,
+                    'school_experience': exp.school_experience
+                }
+                for exp in resume.education_experiences.all()
+            ],
+            
+            # 自定义部分
+            'custom_sections': [
+                {
+                    'id': section.id,
+                    'title': section.title,
+                    'content': section.content
+                }
+                for section in resume.custom_sections.all()
+            ]
+        }
+        
+        return JsonResponse({
+            'success': True,
+            'resume': resume_data
+        })
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@csrf_exempt
+@jwt_required
+def create_or_update_resume(request):
+    """创建或更新简历"""
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持POST请求'}, status=405)
+    try:
+        user = request.user
+        data = json.loads(request.body.decode())
+        
+        # 获取或创建简历
+        resume, created = Resume.objects.get_or_create(user=user)
+        
+        # 更新基本信息
+        if 'name' in data:
+            resume.name = data['name']
+        if 'age' in data:
+            resume.age = data['age']
+        if 'graduation_date' in data:
+            resume.graduation_date = data['graduation_date']
+        if 'education_level' in data:
+            resume.education_level = data['education_level']
+        if 'expected_position' in data:
+            resume.expected_position = data['expected_position']
+        
+        resume.save()
+        
+        return JsonResponse({
+            'success': True,
+            'msg': '简历创建成功' if created else '简历更新成功',
+            'resume_id': resume.id
+        })
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@csrf_exempt
+@jwt_required
+def manage_work_experience(request):
+    """管理工作经历"""
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持POST请求'}, status=405)
+    try:
+        user = request.user
+        data = json.loads(request.body.decode())
+        action = data.get('action')  # 'create', 'update', 'delete'
+        
+        if action == 'create':
+            # 创建工作经历
+            resume = get_object_or_404(Resume, user=user)
+            work_exp = WorkExperience.objects.create(
+                resume=resume,
+                start_date=data['start_date'],
+                end_date=data.get('end_date'),
+                company_name=data['company_name'],
+                department=data.get('department'),
+                position=data.get('position'),
+                work_content=data['work_content'],
+                is_internship=data.get('is_internship', False)
+            )
+            return JsonResponse({
+                'success': True,
+                'msg': '工作经历创建成功',
+                'work_experience_id': work_exp.id
+            })
+            
+        elif action == 'update':
+            # 更新工作经历
+            work_exp = get_object_or_404(WorkExperience, id=data['id'], resume__user=user)
+            if 'start_date' in data:
+                work_exp.start_date = data['start_date']
+            if 'end_date' in data:
+                work_exp.end_date = data['end_date']
+            if 'company_name' in data:
+                work_exp.company_name = data['company_name']
+            if 'department' in data:
+                work_exp.department = data['department']
+            if 'position' in data:
+                work_exp.position = data['position']
+            if 'work_content' in data:
+                work_exp.work_content = data['work_content']
+            if 'is_internship' in data:
+                work_exp.is_internship = data['is_internship']
+            
+            work_exp.save()
+            return JsonResponse({
+                'success': True,
+                'msg': '工作经历更新成功'
+            })
+            
+        elif action == 'delete':
+            # 删除工作经历
+            work_exp = get_object_or_404(WorkExperience, id=data['id'], resume__user=user)
+            work_exp.delete()
+            return JsonResponse({
+                'success': True,
+                'msg': '工作经历删除成功'
+            })
+        
+        else:
+            return JsonResponse({'error': '无效的操作'}, status=400)
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@csrf_exempt
+@jwt_required
+def manage_project_experience(request):
+    """管理项目经历"""
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持POST请求'}, status=405)
+    try:
+        user = request.user
+        data = json.loads(request.body.decode())
+        action = data.get('action')  # 'create', 'update', 'delete'
+        
+        if action == 'create':
+            # 创建项目经历
+            resume = get_object_or_404(Resume, user=user)
+            project_exp = ProjectExperience.objects.create(
+                resume=resume,
+                start_date=data['start_date'],
+                end_date=data.get('end_date'),
+                project_name=data['project_name'],
+                project_role=data['project_role'],
+                project_link=data.get('project_link'),
+                project_content=data['project_content']
+            )
+            return JsonResponse({
+                'success': True,
+                'msg': '项目经历创建成功',
+                'project_experience_id': project_exp.id
+            })
+            
+        elif action == 'update':
+            # 更新项目经历
+            project_exp = get_object_or_404(ProjectExperience, id=data['id'], resume__user=user)
+            if 'start_date' in data:
+                project_exp.start_date = data['start_date']
+            if 'end_date' in data:
+                project_exp.end_date = data['end_date']
+            if 'project_name' in data:
+                project_exp.project_name = data['project_name']
+            if 'project_role' in data:
+                project_exp.project_role = data['project_role']
+            if 'project_link' in data:
+                project_exp.project_link = data['project_link']
+            if 'project_content' in data:
+                project_exp.project_content = data['project_content']
+            
+            project_exp.save()
+            return JsonResponse({
+                'success': True,
+                'msg': '项目经历更新成功'
+            })
+            
+        elif action == 'delete':
+            # 删除项目经历
+            project_exp = get_object_or_404(ProjectExperience, id=data['id'], resume__user=user)
+            project_exp.delete()
+            return JsonResponse({
+                'success': True,
+                'msg': '项目经历删除成功'
+            })
+        
+        else:
+            return JsonResponse({'error': '无效的操作'}, status=400)
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@csrf_exempt
+@jwt_required
+def manage_education_experience(request):
+    """管理教育经历"""
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持POST请求'}, status=405)
+    try:
+        user = request.user
+        data = json.loads(request.body.decode())
+        action = data.get('action')  # 'create', 'update', 'delete'
+        
+        if action == 'create':
+            # 创建教育经历
+            resume = get_object_or_404(Resume, user=user)
+            education_exp = EducationExperience.objects.create(
+                resume=resume,
+                start_date=data['start_date'],
+                end_date=data.get('end_date'),
+                school_name=data['school_name'],
+                education_level=data['education_level'],
+                major=data.get('major'),
+                school_experience=data.get('school_experience')
+            )
+            return JsonResponse({
+                'success': True,
+                'msg': '教育经历创建成功',
+                'education_experience_id': education_exp.id
+            })
+            
+        elif action == 'update':
+            # 更新教育经历
+            education_exp = get_object_or_404(EducationExperience, id=data['id'], resume__user=user)
+            if 'start_date' in data:
+                education_exp.start_date = data['start_date']
+            if 'end_date' in data:
+                education_exp.end_date = data['end_date']
+            if 'school_name' in data:
+                education_exp.school_name = data['school_name']
+            if 'education_level' in data:
+                education_exp.education_level = data['education_level']
+            if 'major' in data:
+                education_exp.major = data['major']
+            if 'school_experience' in data:
+                education_exp.school_experience = data['school_experience']
+            
+            education_exp.save()
+            return JsonResponse({
+                'success': True,
+                'msg': '教育经历更新成功'
+            })
+            
+        elif action == 'delete':
+            # 删除教育经历
+            education_exp = get_object_or_404(EducationExperience, id=data['id'], resume__user=user)
+            education_exp.delete()
+            return JsonResponse({
+                'success': True,
+                'msg': '教育经历删除成功'
+            })
+        
+        else:
+            return JsonResponse({'error': '无效的操作'}, status=400)
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+@csrf_exempt
+@jwt_required
+def manage_custom_section(request):
+    """管理自定义部分"""
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持POST请求'}, status=405)
+    try:
+        user = request.user
+        data = json.loads(request.body.decode())
+        action = data.get('action')  # 'create', 'update', 'delete'
+        
+        if action == 'create':
+            # 创建自定义部分
+            resume = get_object_or_404(Resume, user=user)
+            custom_section = CustomSection.objects.create(
+                resume=resume,
+                title=data['title'],
+                content=data['content']
+            )
+            return JsonResponse({
+                'success': True,
+                'msg': '自定义部分创建成功',
+                'custom_section_id': custom_section.id
+            })
+            
+        elif action == 'update':
+            # 更新自定义部分
+            custom_section = get_object_or_404(CustomSection, id=data['id'], resume__user=user)
+            if 'title' in data:
+                custom_section.title = data['title']
+            if 'content' in data:
+                custom_section.content = data['content']
+            
+            custom_section.save()
+            return JsonResponse({
+                'success': True,
+                'msg': '自定义部分更新成功'
+            })
+            
+        elif action == 'delete':
+            # 删除自定义部分
+            custom_section = get_object_or_404(CustomSection, id=data['id'], resume__user=user)
+            custom_section.delete()
+            return JsonResponse({
+                'success': True,
+                'msg': '自定义部分删除成功'
+            })
+        
+        else:
+            return JsonResponse({'error': '无效的操作'}, status=400)
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

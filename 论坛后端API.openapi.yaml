@@ -1,0 +1,2159 @@
+openapi: 3.0.1
+info:
+  title: 论坛后端API
+  description: 基于Django的论坛后端API，支持用户认证、帖子管理、AI对话、WebRTC视频流和个人简历管理功能
+  version: 1.0.0
+tags:
+  - name: 用户认证
+  - name: 个人信息管理
+  - name: 简历管理
+  - name: 帖子管理
+  - name: AI对话
+  - name: WebRTC视频流
+paths:
+  /users/register/:
+    post:
+      summary: 用户注册
+      deprecated: false
+      description: 创建新用户账户
+      tags:
+        - 用户认证
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  description: 用户名
+                  example: testuser
+                password:
+                  type: string
+                  description: 密码
+                  example: password123
+      responses:
+        '200':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  msg:
+                    type: string
+                    example: 注册成功
+                  user_id:
+                    type: integer
+                    example: 1
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 用户名和密码不能为空
+          headers: {}
+        '405':
+          description: 方法不允许
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 仅支持POST请求
+          headers: {}
+      security: []
+  /users/profile/:
+    get:
+      summary: 获取个人信息
+      deprecated: false
+      description: 获取当前用户的个人信息（需要JWT认证）
+      tags:
+        - 个人信息管理
+      parameters: []
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  profile:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      username:
+                        type: string
+                        example: testuser
+                      email:
+                        type: string
+                        example: user@example.com
+                      first_name:
+                        type: string
+                        example: 张
+                      last_name:
+                        type: string
+                        example: 三
+                      phone:
+                        type: string
+                        example: 13800138000
+                      avatar:
+                        type: string
+                        example: /media/avatars/user1.jpg
+                      date_joined:
+                        type: string
+                        format: date-time
+                        example: '2024-01-01T12:00:00Z'
+                      last_login:
+                        type: string
+                        format: date-time
+                        example: '2024-01-01T12:00:00Z'
+                      resume:
+                        type: object
+                        nullable: true
+                        properties:
+                          id:
+                            type: integer
+                            example: 1
+                          name:
+                            type: string
+                            example: 张三
+                          age:
+                            type: integer
+                            example: 25
+                          graduation_date:
+                            type: string
+                            format: date
+                            example: '2024-06-01'
+                          education_level:
+                            type: string
+                            example: 本科
+                          expected_position:
+                            type: string
+                            example: 软件工程师
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security:
+        - BearerAuth: []
+  /users/profile/update/:
+    post:
+      summary: 更新个人信息
+      deprecated: false
+      description: 更新当前用户的个人信息（需要JWT认证）
+      tags:
+        - 个人信息管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  description: 邮箱地址
+                  example: newemail@example.com
+                first_name:
+                  type: string
+                  description: 名
+                  example: 张
+                last_name:
+                  type: string
+                  description: 姓
+                  example: 三
+                phone:
+                  type: string
+                  description: 手机号码
+                  example: 13800138000
+                avatar:
+                  type: string
+                  description: 头像URL
+                  example: /media/avatars/new_avatar.jpg
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 个人信息更新成功
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security:
+        - BearerAuth: []
+  /users/resume/:
+    get:
+      summary: 获取简历详细信息
+      deprecated: false
+      description: 获取当前用户的完整简历信息（需要JWT认证）
+      tags:
+        - 简历管理
+      parameters: []
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  resume:
+                    type: object
+                    nullable: true
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      name:
+                        type: string
+                        example: 张三
+                      age:
+                        type: integer
+                        example: 25
+                      graduation_date:
+                        type: string
+                        format: date
+                        example: '2024-06-01'
+                      education_level:
+                        type: string
+                        example: 本科
+                      expected_position:
+                        type: string
+                        example: 软件工程师
+                      created_at:
+                        type: string
+                        format: date-time
+                        example: '2024-01-01T12:00:00Z'
+                        updated_at:
+                          type: string
+                          format: date-time
+                          example: '2024-01-01T12:00:00Z'
+                        reply_count:
+                          type: integer
+                          example: 5
+                      work_experiences:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              example: 1
+                            start_date:
+                              type: string
+                              format: date
+                              example: '2023-01-01'
+                            end_date:
+                              type: string
+                              format: date
+                              nullable: true
+                              example: '2023-12-31'
+                            company_name:
+                              type: string
+                              example: 某科技有限公司
+                            department:
+                              type: string
+                              example: 技术部
+                            position:
+                              type: string
+                              example: 软件工程师
+                            work_content:
+                              type: string
+                              example: 负责后端开发工作
+                            is_internship:
+                              type: boolean
+                              example: false
+                      project_experiences:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              example: 1
+                            start_date:
+                              type: string
+                              format: date
+                              example: '2023-06-01'
+                            end_date:
+                              type: string
+                              format: date
+                              nullable: true
+                              example: '2023-08-31'
+                            project_name:
+                              type: string
+                              example: 在线论坛系统
+                            project_role:
+                              type: string
+                              example: 后端开发
+                            project_link:
+                              type: string
+                              example: https://github.com/example/forum
+                            project_content:
+                              type: string
+                              example: 使用Django开发论坛后端API
+                      education_experiences:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              example: 1
+                            start_date:
+                              type: string
+                              format: date
+                              example: '2020-09-01'
+                            end_date:
+                              type: string
+                              format: date
+                              nullable: true
+                              example: '2024-06-01'
+                            school_name:
+                              type: string
+                              example: 某大学
+                            education_level:
+                              type: string
+                              example: 本科
+                            major:
+                              type: string
+                              example: 计算机科学与技术
+                            school_experience:
+                              type: string
+                              example: 获得优秀毕业生称号
+                      custom_sections:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              example: 1
+                            title:
+                              type: string
+                              example: 技能证书
+                            content:
+                              type: string
+                              example: 获得Python开发工程师认证
+                  msg:
+                    type: string
+                    example: 简历不存在
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security:
+        - BearerAuth: []
+  /users/resume/create/:
+    post:
+      summary: 创建或更新简历基本信息
+      deprecated: false
+      description: 创建或更新简历的基本信息（需要JWT认证）
+      tags:
+        - 简历管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 姓名
+                  example: 张三
+                age:
+                  type: integer
+                  description: 年龄
+                  example: 25
+                graduation_date:
+                  type: string
+                  format: date
+                  description: 毕业时间
+                  example: '2024-06-01'
+                education_level:
+                  type: string
+                  description: 学历
+                  example: 本科
+                expected_position:
+                  type: string
+                  description: 期望职位
+                  example: 软件工程师
+      responses:
+        '200':
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 简历创建成功
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security:
+        - BearerAuth: []
+  /users/resume/work/:
+    post:
+      summary: 管理工作经历
+      deprecated: false
+      description: 添加、更新或删除工作经历（需要JWT认证）
+      tags:
+        - 简历管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  description: 操作类型（create/update/delete）
+                  enum: [create, update, delete]
+                  example: create
+                work_id:
+                  type: integer
+                  description: 工作经历ID（更新/删除时需要）
+                  example: 1
+                start_date:
+                  type: string
+                  format: date
+                  description: 开始时间
+                  example: '2023-01-01'
+                end_date:
+                  type: string
+                  format: date
+                  description: 结束时间（可选）
+                  example: '2023-12-31'
+                company_name:
+                  type: string
+                  description: 公司名称
+                  example: 某科技有限公司
+                department:
+                  type: string
+                  description: 部门
+                  example: 技术部
+                position:
+                  type: string
+                  description: 职位
+                  example: 软件工程师
+                work_content:
+                  type: string
+                  description: 工作内容
+                  example: 负责后端开发工作
+                is_internship:
+                  type: boolean
+                  description: 是否为实习
+                  example: false
+      responses:
+        '200':
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 工作经历添加成功
+                  work_experience:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      start_date:
+                        type: string
+                        format: date
+                        example: '2023-01-01'
+                      end_date:
+                        type: string
+                        format: date
+                        nullable: true
+                        example: '2023-12-31'
+                      company_name:
+                        type: string
+                        example: 某科技有限公司
+                      department:
+                        type: string
+                        example: 技术部
+                      position:
+                        type: string
+                        example: 软件工程师
+                      work_content:
+                        type: string
+                        example: 负责后端开发工作
+                      is_internship:
+                        type: boolean
+                        example: false
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 操作类型不能为空
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security:
+        - BearerAuth: []
+  /users/resume/project/:
+    post:
+      summary: 管理项目经历
+      deprecated: false
+      description: 添加、更新或删除项目经历（需要JWT认证）
+      tags:
+        - 简历管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  description: 操作类型（create/update/delete）
+                  enum: [create, update, delete]
+                  example: create
+                project_id:
+                  type: integer
+                  description: 项目经历ID（更新/删除时需要）
+                  example: 1
+                start_date:
+                  type: string
+                  format: date
+                  description: 开始时间
+                  example: '2023-06-01'
+                end_date:
+                  type: string
+                  format: date
+                  description: 结束时间（可选）
+                  example: '2023-08-31'
+                project_name:
+                  type: string
+                  description: 项目名称
+                  example: 在线论坛系统
+                project_role:
+                  type: string
+                  description: 项目角色
+                  example: 后端开发
+                project_link:
+                  type: string
+                  description: 项目链接
+                  example: https://github.com/example/forum
+                project_content:
+                  type: string
+                  description: 项目内容
+                  example: 使用Django开发论坛后端API
+      responses:
+        '200':
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 项目经历添加成功
+                  project_experience:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      start_date:
+                        type: string
+                        format: date
+                        example: '2023-06-01'
+                      end_date:
+                        type: string
+                        format: date
+                        nullable: true
+                        example: '2023-08-31'
+                      project_name:
+                        type: string
+                        example: 在线论坛系统
+                      project_role:
+                        type: string
+                        example: 后端开发
+                      project_link:
+                        type: string
+                        example: https://github.com/example/forum
+                      project_content:
+                        type: string
+                        example: 使用Django开发论坛后端API
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 操作类型不能为空
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security:
+        - BearerAuth: []
+  /users/resume/education/:
+    post:
+      summary: 管理教育经历
+      deprecated: false
+      description: 添加、更新或删除教育经历（需要JWT认证）
+      tags:
+        - 简历管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  description: 操作类型（create/update/delete）
+                  enum: [create, update, delete]
+                  example: create
+                education_id:
+                  type: integer
+                  description: 教育经历ID（更新/删除时需要）
+                  example: 1
+                start_date:
+                  type: string
+                  format: date
+                  description: 开始时间
+                  example: '2020-09-01'
+                end_date:
+                  type: string
+                  format: date
+                  description: 结束时间（可选）
+                  example: '2024-06-01'
+                school_name:
+                  type: string
+                  description: 学校名称
+                  example: 某大学
+                education_level:
+                  type: string
+                  description: 学历
+                  example: 本科
+                major:
+                  type: string
+                  description: 专业
+                  example: 计算机科学与技术
+                school_experience:
+                  type: string
+                  description: 学校经历
+                  example: 获得优秀毕业生称号
+      responses:
+        '200':
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 教育经历添加成功
+                  education_experience:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      start_date:
+                        type: string
+                        format: date
+                        example: '2020-09-01'
+                      end_date:
+                        type: string
+                        format: date
+                        nullable: true
+                        example: '2024-06-01'
+                      school_name:
+                        type: string
+                        example: 某大学
+                      education_level:
+                        type: string
+                        example: 本科
+                      major:
+                        type: string
+                        example: 计算机科学与技术
+                      school_experience:
+                        type: string
+                        example: 获得优秀毕业生称号
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 操作类型不能为空
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security: []
+  /users/resume/custom/:
+    post:
+      summary: 管理自定义部分
+      deprecated: false
+      description: 添加、更新或删除自定义部分（需要JWT认证）
+      tags:
+        - 简历管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - action
+              properties:
+                action:
+                  type: string
+                  description: 操作类型（create/update/delete）
+                  enum: [create, update, delete]
+                  example: create
+                custom_id:
+                  type: integer
+                  description: 自定义部分ID（更新/删除时需要）
+                  example: 1
+                title:
+                  type: string
+                  description: 标题
+                  example: 技能证书
+                content:
+                  type: string
+                  description: 内容
+                  example: 获得Python开发工程师认证
+      responses:
+        '200':
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 自定义部分添加成功
+                  custom_section:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      title:
+                        type: string
+                        example: 技能证书
+                      content:
+                        type: string
+                        example: 获得Python开发工程师认证
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 操作类型不能为空
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security: []
+  /users/login/:
+    post:
+      summary: 用户登录
+      deprecated: false
+      description: 用户登录并返回JWT令牌
+      tags:
+        - 用户认证
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  description: 用户名
+                  example: testuser
+                password:
+                  type: string
+                  description: 密码
+                  example: password123
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: JWT令牌
+                    example: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
+                  msg:
+                    type: string
+                    example: 登录成功
+          headers: {}
+        '400':
+          description: 登录失败
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 用户名或密码错误
+          headers: {}
+      security: []
+  /posts/create/:
+    post:
+      summary: 创建帖子
+      deprecated: false
+      description: 创建新帖子（需要JWT认证）
+      tags:
+        - 帖子管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - title
+                - content
+              properties:
+                title:
+                  type: string
+                  description: 帖子标题
+                  example: 我的第一篇帖子
+                content:
+                  type: string
+                  description: 帖子内容
+                  example: 这是帖子的详细内容...
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  msg:
+                    type: string
+                    example: 发帖成功
+                  post_id:
+                    type: integer
+                    example: 1
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 标题和内容不能为空
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security: []
+  /posts/detail/{post_id}/:
+    get:
+      summary: 获取帖子详细信息
+      deprecated: false
+      description: 获取指定帖子的详细信息，包含所有回复（无需认证）
+      tags:
+        - 帖子管理
+      parameters:
+        - name: post_id
+          in: path
+          description: 帖子ID
+          required: true
+          example: 1
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  post:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      title:
+                        type: string
+                        example: 帖子标题
+                      content:
+                        type: string
+                        example: 帖子内容
+                      author:
+                        type: string
+                        example: username
+                      created_at:
+                        type: string
+                        format: date-time
+                        example: '2024-01-01T12:00:00Z'
+                      updated_at:
+                        type: string
+                        format: date-time
+                        example: '2024-01-01T12:00:00Z'
+                      reply_count:
+                        type: integer
+                        example: 5
+                      replies:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: integer
+                              example: 1
+                            content:
+                              type: string
+                              example: 回复内容
+                            author:
+                              type: string
+                              example: username
+                            created_at:
+                              type: string
+                              format: date-time
+                              example: '2024-01-01T12:00:00Z'
+                            updated_at:
+                              type: string
+                              format: date-time
+                              example: '2024-01-01T12:00:00Z'
+                            parent_reply_id:
+                              type: integer
+                              nullable: true
+                              example: null
+                            child_replies:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id:
+                                    type: integer
+                                    example: 2
+                                  content:
+                                    type: string
+                                    example: 子回复内容
+                                  author:
+                                    type: string
+                                    example: username
+                                  created_at:
+                                    type: string
+                                    format: date-time
+                                    example: '2024-01-01T12:00:00Z'
+                                  parent_reply_id:
+                                    type: integer
+                                    example: 1
+          headers: {}
+        '404':
+          description: 帖子不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 帖子不存在
+          headers: {}
+      security:
+        - BearerAuth: []
+  /posts/reply/create/{post_id}/:
+    post:
+      summary: 创建回复
+      deprecated: false
+      description: 为指定帖子创建回复，支持嵌套回复（需要JWT认证）
+      tags:
+        - 帖子管理
+      parameters:
+        - name: post_id
+          in: path
+          description: 帖子ID
+          required: true
+          example: 1
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+                  description: 回复内容
+                  example: 这是一个回复
+                parent_reply_id:
+                  type: integer
+                  description: 父回复ID（可选，用于嵌套回复）
+                  example: 1
+      responses:
+        '200':
+          description: 回复成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 回复成功
+                  reply:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      content:
+                        type: string
+                        example: 回复内容
+                      author:
+                        type: string
+                        example: username
+                      created_at:
+                        type: string
+                        format: date-time
+                        example: '2024-01-01T12:00:00Z'
+                      parent_reply_id:
+                        type: integer
+                        nullable: true
+                        example: null
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 回复内容不能为空
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+        '404':
+          description: 帖子或父回复不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 帖子不存在
+          headers: {}
+      security:
+        - BearerAuth: []
+  /posts/reply/update/{reply_id}/:
+    post:
+      summary: 更新回复
+      deprecated: false
+      description: 更新指定回复（需要JWT认证，仅作者可改）
+      tags:
+        - 帖子管理
+      parameters:
+        - name: reply_id
+          in: path
+          description: 回复ID
+          required: true
+          example: 1
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+                  description: 新的回复内容
+                  example: 更新后的回复内容
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 回复更新成功
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 回复内容不能为空
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+        '403':
+          description: 权限不足
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 无权限修改他人回复
+          headers: {}
+        '404':
+          description: 回复不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 回复不存在
+          headers: {}
+      security:
+        - BearerAuth: []
+  /posts/reply/delete/{reply_id}/:
+    post:
+      summary: 删除回复
+      deprecated: false
+      description: 删除指定回复（需要JWT认证，仅作者可删）
+      tags:
+        - 帖子管理
+      parameters:
+        - name: reply_id
+          in: path
+          description: 回复ID
+          required: true
+          example: 1
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 回复删除成功
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+        '403':
+          description: 权限不足
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 无权限删除他人回复
+          headers: {}
+        '404':
+          description: 回复不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 回复不存在
+          headers: {}
+      security: []
+  /posts/delete/{post_id}/:
+    delete:
+      summary: 删除帖子
+      deprecated: false
+      description: 删除指定帖子（需要JWT认证，仅作者可删）
+      tags:
+        - 帖子管理
+      parameters:
+        - name: post_id
+          in: path
+          description: 帖子ID
+          required: true
+          example: 1
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  msg:
+                    type: string
+                    example: 删除成功
+          headers: {}
+        '403':
+          description: 权限不足
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 无权限删除他人帖子
+          headers: {}
+        '404':
+          description: 帖子不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 帖子不存在
+          headers: {}
+      security: []
+    post:
+      summary: 删除帖子
+      deprecated: false
+      description: 删除指定帖子（需要JWT认证，仅作者可删）
+      tags:
+        - 帖子管理
+      parameters:
+        - name: post_id
+          in: path
+          description: 帖子ID
+          required: true
+          example: 1
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  msg:
+                    type: string
+                    example: 删除成功
+          headers: {}
+        '403':
+          description: 权限不足
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 无权限删除他人帖子
+          headers: {}
+        '404':
+          description: 帖子不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 帖子不存在
+          headers: {}
+      security:
+        - BearerAuth: []
+  /posts/update/{post_id}/:
+    post:
+      summary: 更新帖子
+      deprecated: false
+      description: 更新指定帖子（需要JWT认证，仅作者可改）
+      tags:
+        - 帖子管理
+      parameters:
+        - name: post_id
+          in: path
+          description: 帖子ID
+          required: true
+          example: 1
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: 帖子标题（可选）
+                  example: 更新后的标题
+                content:
+                  type: string
+                  description: 帖子内容（可选）
+                  example: 更新后的内容
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  msg:
+                    type: string
+                    example: 修改成功
+          headers: {}
+        '403':
+          description: 权限不足
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 无权限修改他人帖子
+          headers: {}
+        '404':
+          description: 帖子不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 帖子不存在
+          headers: {}
+      security: []
+  /posts/list/:
+    get:
+      summary: 获取帖子列表
+      deprecated: false
+      description: 分页获取所有帖子（无需认证）
+      tags:
+        - 帖子管理
+      parameters:
+        - name: page
+          in: query
+          description: 页码
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          description: 每页数量
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                          example: 1
+                        title:
+                          type: string
+                          example: 帖子标题
+                        content:
+                          type: string
+                          example: 帖子内容
+                        author:
+                          type: string
+                          example: username
+                        created_at:
+                          type: string
+                          format: date-time
+                          example: '2024-01-01T12:00:00Z'
+                        updated_at:
+                          type: string
+                          format: date-time
+                          example: '2024-01-01T12:00:00Z'
+                        reply_count:
+                          type: integer
+                          example: 5
+                  total:
+                    type: integer
+                    description: 总帖子数
+                    example: 100
+                  num_pages:
+                    type: integer
+                    description: 总页数
+                    example: 10
+                  current_page:
+                    type: integer
+                    description: 当前页码
+                    example: 1
+          headers: {}
+        '405':
+          description: 方法不允许
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 仅支持GET请求
+          headers: {}
+      security: []
+  /posts/chat/:
+    post:
+      summary: AI对话
+      deprecated: false
+      description: 与讯飞大模型进行对话（流式响应）
+      tags:
+        - AI对话
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+                  description: 用户消息
+                  example: 你好，请介绍一下Python
+      responses:
+        '200':
+          description: 流式响应
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: Server-Sent Events格式的流式响应
+                example: |
+                  data: {"content": "你好！Python是一种高级编程语言..."}
+
+                  data: {"content": "它具有简洁的语法和强大的功能..."}
+
+                  data: {"content": "希望这个介绍对你有帮助！"}
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 消息不能为空
+          headers: {}
+        '405':
+          description: 方法不允许
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 仅支持POST请求
+          headers: {}
+      security: []
+  /webrtc/streams/:
+    get:
+      summary: 获取视频流列表
+      deprecated: false
+      description: 获取所有活跃的视频流列表（需要登录）
+      tags:
+        - WebRTC视频流
+      parameters: []
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  streams:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          example: '123e4567-e89b-12d3-a456-426614174000'
+                        title:
+                          type: string
+                          example: 我的直播
+                        description:
+                          type: string
+                          example: 这是一个测试直播
+                        user:
+                          type: string
+                          example: username
+                        created_at:
+                          type: string
+                          format: date-time
+                          example: '2024-01-01T12:00:00Z'
+                        viewer_count:
+                          type: integer
+                          example: 5
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 需要登录
+          headers: {}
+      security:
+        - BearerAuth: []
+  /webrtc/streams/create/:
+    post:
+      summary: 创建视频流
+      deprecated: false
+      description: 创建新的视频流（需要登录）
+      tags:
+        - WebRTC视频流
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: 流标题
+                  example: 我的直播
+                description:
+                  type: string
+                  description: 流描述
+                  example: 这是一个测试直播
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  stream:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        example: '123e4567-e89b-12d3-a456-426614174000'
+                      title:
+                        type: string
+                        example: 我的直播
+                      description:
+                        type: string
+                        example: 这是一个测试直播
+                      created_at:
+                        type: string
+                        format: date-time
+                        example: '2024-01-01T12:00:00Z'
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 无效的JSON格式
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 需要登录
+          headers: {}
+      security:
+        - BearerAuth: []
+  /webrtc/streams/{stream_id}/:
+    get:
+      summary: 获取视频流信息
+      deprecated: false
+      description: 获取指定视频流的详细信息（需要登录）
+      tags:
+        - WebRTC视频流
+      parameters:
+        - name: stream_id
+          in: path
+          description: 视频流ID
+          required: true
+          example: '123e4567-e89b-12d3-a456-426614174000'
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  stream:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        example: '123e4567-e89b-12d3-a456-426614174000'
+                      title:
+                        type: string
+                        example: 我的直播
+                      description:
+                        type: string
+                        example: 这是一个测试直播
+                      user:
+                        type: string
+                        example: username
+                      created_at:
+                        type: string
+                        format: date-time
+                        example: '2024-01-01T12:00:00Z'
+                      viewer_count:
+                        type: integer
+                        example: 5
+                      connections:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            peer_id:
+                              type: string
+                              example: 'peer123'
+                            session_id:
+                              type: string
+                              example: 'session456'
+                            connection_state:
+                              type: string
+                              example: connected
+                            created_at:
+                              type: string
+                              format: date-time
+                              example: '2024-01-01T12:00:00Z'
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 需要登录
+          headers: {}
+        '404':
+          description: 视频流不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 视频流不存在
+          headers: {}
+      security:
+        - BearerAuth: []
+  /webrtc/streams/{stream_id}/delete/:
+    delete:
+      summary: 删除视频流
+      deprecated: false
+      description: 删除指定的视频流（需要登录，仅创建者可删）
+      tags:
+        - WebRTC视频流
+      parameters:
+        - name: stream_id
+          in: path
+          description: 视频流ID
+          required: true
+          example: '123e4567-e89b-12d3-a456-426614174000'
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: 视频流已删除
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 需要登录
+          headers: {}
+        '404':
+          description: 视频流不存在或无权限删除
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 视频流不存在或无权限删除
+          headers: {}
+      security:
+        - BearerAuth: []
+  /webrtc/streams/{stream_id}/frames/:
+    get:
+      summary: 获取视频流关键帧
+      deprecated: false
+      description: 获取指定视频流的关键帧信息（需要登录）
+      tags:
+        - WebRTC视频流
+      parameters:
+        - name: stream_id
+          in: path
+          description: 视频流ID
+          required: true
+          example: '123e4567-e89b-12d3-a456-426614174000'
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  frames:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          example: '123e4567-e89b-12d3-a456-426614174001'
+                        timestamp:
+                          type: string
+                          format: date-time
+                          example: '2024-01-01T12:00:00Z'
+                        frame_type:
+                          type: string
+                          example: keyframe
+                        frame_size:
+                          type: integer
+                          example: 1024
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 需要登录
+          headers: {}
+        '404':
+          description: 视频流不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 视频流不存在
+          headers: {}
+      security:
+        - BearerAuth: []
+  /webrtc/streams/{stream_id}/stats/:
+    get:
+      summary: 获取连接统计信息
+      deprecated: false
+      description: 获取指定视频流的连接统计信息（需要登录，仅创建者可查看）
+      tags:
+        - WebRTC视频流
+      parameters:
+        - name: stream_id
+          in: path
+          description: 视频流ID
+          required: true
+          example: '123e4567-e89b-12d3-a456-426614174000'
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  stats:
+                    type: object
+                    properties:
+                      total_connections:
+                        type: integer
+                        example: 10
+                      connected_connections:
+                        type: integer
+                        example: 5
+                      disconnected_connections:
+                        type: integer
+                        example: 3
+                      failed_connections:
+                        type: integer
+                        example: 2
+                      success_rate:
+                        type: number
+                        format: float
+                        example: 50.0
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 需要登录
+          headers: {}
+        '404':
+          description: 视频流不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: 视频流不存在
+          headers: {}
+      security:
+        - BearerAuth: []
+components:
+  schemas: {}
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT认证令牌，格式为 "Bearer <token>"
+servers:
+  - url: http://localhost:8000
+    description: 开发服务器
+security:
+  - BearerAuth: []
