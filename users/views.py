@@ -49,7 +49,12 @@ def login_view(request):
             'exp': datetime.utcnow() + timedelta(days=7)
         }
         token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
-        return JsonResponse({'token': token, 'msg': '登录成功'})
+        return JsonResponse({
+            'token': token, 
+            'user_id': user.id,
+            'username': user.username,
+            'msg': '登录成功'
+        })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
