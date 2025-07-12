@@ -2,7 +2,8 @@ from django.urls import path
 from .views import (
     register, login_view, get_user_profile, update_user_profile,
     get_resume, create_or_update_resume, manage_work_experience,
-    manage_project_experience, manage_education_experience, manage_custom_section
+    manage_project_experience, manage_education_experience, manage_custom_section,
+    delete_work_experience, delete_project_experience, delete_education_experience, delete_custom_section
 )
 
 urlpatterns = [
@@ -28,4 +29,10 @@ urlpatterns = [
     
     # 自定义部分管理
     path('resume/custom/', manage_custom_section, name='manage_custom_section'),
+    
+    # 删除接口
+    path('resume/work/delete/', delete_work_experience, name='delete_work_experience'),
+    path('resume/project/delete/', delete_project_experience, name='delete_project_experience'),
+    path('resume/education/delete/', delete_education_experience, name='delete_education_experience'),
+    path('resume/custom/delete/', delete_custom_section, name='delete_custom_section'),
 ] 

@@ -465,7 +465,7 @@ paths:
     post:
       summary: 管理工作经历
       deprecated: false
-      description: 添加、更新或删除工作经历（需要JWT认证）
+      description: 创建或更新工作经历（需要JWT认证）。创建时不传work_id，后端自动生成ID；更新时传work_id，后端通过用户ID验证权限
       tags:
         - 简历管理
       parameters: []
@@ -474,17 +474,10 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - action
               properties:
-                action:
-                  type: string
-                  description: 操作类型（create/update/delete）
-                  enum: [create, update, delete]
-                  example: create
                 work_id:
                   type: integer
-                  description: 工作经历ID（更新/删除时需要）
+                  description: 工作经历ID（更新时必需，创建时不传。ID由后端自动生成，前端通过查询获取）
                   example: 1
                 start_date:
                   type: string
@@ -529,37 +522,10 @@ paths:
                     example: true
                   msg:
                     type: string
-                    example: 工作经历添加成功
-                  work_experience:
-                    type: object
-                    properties:
-                      id:
-                        type: integer
-                        example: 1
-                      start_date:
-                        type: string
-                        format: date
-                        example: '2023-01-01'
-                      end_date:
-                        type: string
-                        format: date
-                        nullable: true
-                        example: '2023-12-31'
-                      company_name:
-                        type: string
-                        example: 某科技有限公司
-                      department:
-                        type: string
-                        example: 技术部
-                      position:
-                        type: string
-                        example: 软件工程师
-                      work_content:
-                        type: string
-                        example: 负责后端开发工作
-                      is_internship:
-                        type: boolean
-                        example: false
+                    example: 工作经历创建成功
+                  work_experience_id:
+                    type: integer
+                    example: 1
           headers: {}
         '400':
           description: 请求参数错误
@@ -570,7 +536,88 @@ paths:
                 properties:
                   error:
                     type: string
-                    example: 操作类型不能为空
+                    example: 缺少必要参数
+          headers: {}
+        '404':
+          description: 工作经历不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 工作经历不存在
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security:
+        - BearerAuth: []
+  /users/resume/work/delete/:
+    post:
+      summary: 删除工作经历
+      deprecated: false
+      description: 删除指定的工作经历（需要JWT认证）。通过用户ID验证权限，确保只能删除自己的经历
+      tags:
+        - 简历管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - work_id
+              properties:
+                work_id:
+                  type: integer
+                  description: 工作经历ID（由后端自动生成，前端通过查询获取）
+                  example: 1
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 工作经历删除成功
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 缺少work_id参数
+          headers: {}
+        '404':
+          description: 工作经历不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 工作经历不存在
           headers: {}
         '401':
           description: 未授权
@@ -589,7 +636,7 @@ paths:
     post:
       summary: 管理项目经历
       deprecated: false
-      description: 添加、更新或删除项目经历（需要JWT认证）
+      description: 创建或更新项目经历（需要JWT认证）。创建时不传project_id，后端自动生成ID；更新时传project_id，后端通过用户ID验证权限
       tags:
         - 简历管理
       parameters: []
@@ -598,17 +645,10 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - action
               properties:
-                action:
-                  type: string
-                  description: 操作类型（create/update/delete）
-                  enum: [create, update, delete]
-                  example: create
                 project_id:
                   type: integer
-                  description: 项目经历ID（更新/删除时需要）
+                  description: 项目经历ID（更新时必需，创建时不传。ID由后端自动生成，前端通过查询获取）
                   example: 1
                 start_date:
                   type: string
@@ -649,34 +689,10 @@ paths:
                     example: true
                   msg:
                     type: string
-                    example: 项目经历添加成功
-                  project_experience:
-                    type: object
-                    properties:
-                      id:
-                        type: integer
-                        example: 1
-                      start_date:
-                        type: string
-                        format: date
-                        example: '2023-06-01'
-                      end_date:
-                        type: string
-                        format: date
-                        nullable: true
-                        example: '2023-08-31'
-                      project_name:
-                        type: string
-                        example: 在线论坛系统
-                      project_role:
-                        type: string
-                        example: 后端开发
-                      project_link:
-                        type: string
-                        example: https://github.com/example/forum
-                      project_content:
-                        type: string
-                        example: 使用Django开发论坛后端API
+                    example: 项目经历创建成功
+                  project_experience_id:
+                    type: integer
+                    example: 1
           headers: {}
         '400':
           description: 请求参数错误
@@ -687,7 +703,88 @@ paths:
                 properties:
                   error:
                     type: string
-                    example: 操作类型不能为空
+                    example: 缺少必要参数
+          headers: {}
+        '404':
+          description: 项目经历不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 项目经历不存在
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security:
+        - BearerAuth: []
+  /users/resume/project/delete/:
+    post:
+      summary: 删除项目经历
+      deprecated: false
+      description: 删除指定的项目经历（需要JWT认证）。通过用户ID验证权限，确保只能删除自己的经历
+      tags:
+        - 简历管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - project_id
+              properties:
+                project_id:
+                  type: integer
+                  description: 项目经历ID（由后端自动生成，前端通过查询获取）
+                  example: 1
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 项目经历删除成功
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 缺少project_id参数
+          headers: {}
+        '404':
+          description: 项目经历不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 项目经历不存在
           headers: {}
         '401':
           description: 未授权
@@ -706,7 +803,7 @@ paths:
     post:
       summary: 管理教育经历
       deprecated: false
-      description: 添加、更新或删除教育经历（需要JWT认证）
+      description: 创建或更新教育经历（需要JWT认证）。创建时不传education_id，后端自动生成ID；更新时传education_id，后端通过用户ID验证权限
       tags:
         - 简历管理
       parameters: []
@@ -715,17 +812,10 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - action
               properties:
-                action:
-                  type: string
-                  description: 操作类型（create/update/delete）
-                  enum: [create, update, delete]
-                  example: create
                 education_id:
                   type: integer
-                  description: 教育经历ID（更新/删除时需要）
+                  description: 教育经历ID（更新时必需，创建时不传。ID由后端自动生成，前端通过查询获取）
                   example: 1
                 start_date:
                   type: string
@@ -766,34 +856,10 @@ paths:
                     example: true
                   msg:
                     type: string
-                    example: 教育经历添加成功
-                  education_experience:
-                    type: object
-                    properties:
-                      id:
-                        type: integer
-                        example: 1
-                      start_date:
-                        type: string
-                        format: date
-                        example: '2020-09-01'
-                      end_date:
-                        type: string
-                        format: date
-                        nullable: true
-                        example: '2024-06-01'
-                      school_name:
-                        type: string
-                        example: 某大学
-                      education_level:
-                        type: string
-                        example: 本科
-                      major:
-                        type: string
-                        example: 计算机科学与技术
-                      school_experience:
-                        type: string
-                        example: 获得优秀毕业生称号
+                    example: 教育经历创建成功
+                  education_experience_id:
+                    type: integer
+                    example: 1
           headers: {}
         '400':
           description: 请求参数错误
@@ -804,7 +870,87 @@ paths:
                 properties:
                   error:
                     type: string
-                    example: 操作类型不能为空
+                    example: 缺少必要参数
+          headers: {}
+        '404':
+          description: 教育经历不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 教育经历不存在
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security: []
+  /users/resume/education/delete/:
+    post:
+      summary: 删除教育经历
+      deprecated: false
+      description: 删除指定的教育经历（需要JWT认证）。通过用户ID验证权限，确保只能删除自己的经历
+      tags:
+        - 简历管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - education_id
+              properties:
+                education_id:
+                  type: integer
+                  description: 教育经历ID（由后端自动生成，前端通过查询获取）
+                  example: 1
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 教育经历删除成功
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 缺少education_id参数
+          headers: {}
+        '404':
+          description: 教育经历不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 教育经历不存在
           headers: {}
         '401':
           description: 未授权
@@ -822,7 +968,7 @@ paths:
     post:
       summary: 管理自定义部分
       deprecated: false
-      description: 添加、更新或删除自定义部分（需要JWT认证）
+      description: 创建或更新自定义部分（需要JWT认证）。创建时不传custom_id，后端自动生成ID；更新时传custom_id，后端通过用户ID验证权限
       tags:
         - 简历管理
       parameters: []
@@ -831,17 +977,10 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-                - action
               properties:
-                action:
-                  type: string
-                  description: 操作类型（create/update/delete）
-                  enum: [create, update, delete]
-                  example: create
                 custom_id:
                   type: integer
-                  description: 自定义部分ID（更新/删除时需要）
+                  description: 自定义部分ID（更新时必需，创建时不传。ID由后端自动生成，前端通过查询获取）
                   example: 1
                 title:
                   type: string
@@ -864,19 +1003,10 @@ paths:
                     example: true
                   msg:
                     type: string
-                    example: 自定义部分添加成功
-                  custom_section:
-                    type: object
-                    properties:
-                      id:
-                        type: integer
-                        example: 1
-                      title:
-                        type: string
-                        example: 技能证书
-                      content:
-                        type: string
-                        example: 获得Python开发工程师认证
+                    example: 自定义部分创建成功
+                  custom_section_id:
+                    type: integer
+                    example: 1
           headers: {}
         '400':
           description: 请求参数错误
@@ -887,7 +1017,87 @@ paths:
                 properties:
                   error:
                     type: string
-                    example: 操作类型不能为空
+                    example: 缺少必要参数
+          headers: {}
+        '404':
+          description: 自定义部分不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 自定义部分不存在
+          headers: {}
+        '401':
+          description: 未授权
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 未提供有效的JWT令牌
+          headers: {}
+      security: []
+  /users/resume/custom/delete/:
+    post:
+      summary: 删除自定义部分
+      deprecated: false
+      description: 删除指定的自定义部分（需要JWT认证）。通过用户ID验证权限，确保只能删除自己的经历
+      tags:
+        - 简历管理
+      parameters: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - custom_id
+              properties:
+                custom_id:
+                  type: integer
+                  description: 自定义部分ID（由后端自动生成，前端通过查询获取）
+                  example: 1
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  msg:
+                    type: string
+                    example: 自定义部分删除成功
+          headers: {}
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 缺少custom_id参数
+          headers: {}
+        '404':
+          description: 自定义部分不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: 自定义部分不存在
           headers: {}
         '401':
           description: 未授权
