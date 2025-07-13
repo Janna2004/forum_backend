@@ -35,14 +35,27 @@ def login_view(request):
     if request.method != 'POST':
         return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
+        # 添加调试信息
+        if settings.DEBUG:
+            print(f"登录请求路径: {request.path}")
+            print(f"请求内容类型: {request.content_type}")
+            print(f"请求体长度: {len(request.body) if request.body else 0}")
+        
+        # 检查请求体是否为空
+        if not request.body:
+            return JsonResponse({'error': '请求体不能为空'}, status=400)
+        
         data = json.loads(request.body.decode())
         username = data.get('username')
         password = data.get('password')
+        
         if not username or not password:
             return JsonResponse({'error': '用户名和密码不能为空'}, status=400)
+        
         user = authenticate(username=username, password=password)
         if user is None:
             return JsonResponse({'error': '用户名或密码错误'}, status=400)
+        
         payload = {
             'user_id': user.id,
             'username': user.username,
@@ -55,6 +68,8 @@ def login_view(request):
             'username': user.username,
             'msg': '登录成功'
         })
+    except json.JSONDecodeError as e:
+        return JsonResponse({'error': f'JSON解析错误: {str(e)}'}, status=400)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 

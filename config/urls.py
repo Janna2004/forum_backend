@@ -18,8 +18,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # 原始URL配置
     path("users/", include("users.urls")),
     path("posts/", include("posts.urls")),
     path("webrtc/", include("webrtc.urls")),
