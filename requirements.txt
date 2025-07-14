@@ -10,4 +10,6 @@ channels>=4.0.0
 channels-redis>=4.1.0
 redis>=4.5.0 
 uvicorn>=0.35.0
-django-cors-headers>=4.3.0 
+django-cors-headers>=4.3.0
+requests>=2.31.0
+djangorestframework>=3.14.0

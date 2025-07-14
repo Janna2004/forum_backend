@@ -25,4 +25,5 @@ urlpatterns = [
     path("users/", include("users.urls")),
     path("posts/", include("posts.urls")),
     path("webrtc/", include("webrtc.urls")),
+    path("code/", include("code.urls")),
 ]
