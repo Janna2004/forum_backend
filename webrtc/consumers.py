@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 class WebRTCConsumer(AsyncWebsocketConsumer):
     """WebRTC WebSocket消费者"""
+    PHASE_INTRO = 'intro'
+    PHASE_QUESTION = 'question'
+    PHASE_CODE = 'code'
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -28,7 +31,11 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         self.connection = None
         self.rtasr_client = None  # 讯飞RTASR实例
         self.question_queue = []  # 面试问题队列
-    
+        self.phase = self.PHASE_INTRO
+        self.silence_timer = None
+        self.last_asr_text = ''
+        self._ws_loop = None
+
     async def connect(self):
         print("[WebRTCConsumer] connect called")
         await self.accept()
@@ -36,10 +43,10 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             self.user = await self.get_user() if hasattr(self, 'get_user') else None
             self.session_id = str(uuid.uuid4())
             loop = asyncio.get_event_loop()
+            self._ws_loop = loop
             def on_rtasr_result(text):
-                print('[RTASR回调]', text)  # 调试日志
-                asyncio.run_coroutine_threadsafe(
-                    self.send(text_data=json.dumps({'type': 'asr_result', 'text': text})), loop)
+                print('[RTASR回调]', text)
+                asyncio.run_coroutine_threadsafe(self.handle_asr_result(text), loop)
             def start_rtasr():
                 try:
                     print("[WebRTCConsumer] RTASR ws connecting...")
@@ -57,11 +64,18 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 'session_id': self.session_id,
                 'message': 'WebRTC连接已建立'
             }))
-            print("[WebRTCConsumer] ws accepted, session_id=", self.session_id)
+            # 主动推送面试官开场白
+            await self.send(text_data=json.dumps({
+                'type': 'interview_message',
+                'phase': self.PHASE_INTRO,
+                'message': '请开始自我介绍吧'
+            }))
+            self.phase = self.PHASE_INTRO
+            self.start_silence_timer()
         except Exception as e:
             print(f"[WebRTCConsumer] connect error: {e}")
             await self.send(text_data=json.dumps({'type': 'error', 'message': f'初始化失败: {e}'}))
-    
+
     async def disconnect(self, close_code):
         print(f"[WebRTCConsumer] disconnect called, code={close_code}")
         """断开WebSocket连接"""
@@ -384,6 +398,85 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             
         except Exception as e:
             logger.error(f"断开连接失败: {str(e)}")
+    
+    def start_silence_timer(self, timeout=15):
+        if self.silence_timer:
+            self.silence_timer.cancel()
+        loop = self._ws_loop or asyncio.get_event_loop()
+        self.silence_timer = loop.call_later(timeout, lambda: asyncio.run_coroutine_threadsafe(self.handle_silence(), loop))
+
+    def reset_silence_timer(self, timeout=15):
+        self.start_silence_timer(timeout)
+
+    async def handle_silence(self):
+        # 15s无语音，自动切换阶段
+        if self.phase == self.PHASE_INTRO:
+            await self.finish_intro()
+        elif self.phase == self.PHASE_QUESTION:
+            await self.next_question()
+        # 代码题阶段暂不处理
+
+    async def handle_asr_result(self, text):
+        # 只处理中文文本
+        asr_text = ''
+        try:
+            obj = json.loads(text) if isinstance(text, str) else text
+            def extract_chinese(obj):
+                result = ''
+                if isinstance(obj, str):
+                    result += ''.join([c for c in obj if '\u4e00' <= c <= '\u9fa5'])
+                elif isinstance(obj, list):
+                    for item in obj:
+                        result += extract_chinese(item)
+                elif isinstance(obj, dict):
+                    for v in obj.values():
+                        result += extract_chinese(v)
+                return result
+            asr_text = extract_chinese(obj)
+        except Exception:
+            asr_text = str(text)
+        self.last_asr_text = asr_text
+        # 重置静默计时
+        self.reset_silence_timer()
+        # 检查“说完了”
+        if '说完了' in asr_text:
+            if self.phase == self.PHASE_INTRO:
+                await self.finish_intro()
+            elif self.phase == self.PHASE_QUESTION:
+                await self.next_question()
+
+    async def finish_intro(self):
+        self.phase = self.PHASE_QUESTION
+        if self.silence_timer:
+            self.silence_timer.cancel()
+        await self.send(text_data=json.dumps({
+            'type': 'interview_message',
+            'phase': self.PHASE_QUESTION,
+            'message': '自我介绍结束，下面开始问问题。'
+        }))
+        await asyncio.sleep(1)
+        await self.next_question()
+
+    async def next_question(self):
+        if self.silence_timer:
+            self.silence_timer.cancel()
+        if self.question_queue:
+            question = self.question_queue.pop(0)
+            await self.send(text_data=json.dumps({
+                'type': 'interview_message',
+                'phase': self.PHASE_QUESTION,
+                'message': question
+            }))
+            self.phase = self.PHASE_QUESTION
+            self.start_silence_timer()
+        else:
+            self.phase = self.PHASE_CODE
+            await self.send(text_data=json.dumps({
+                'type': 'interview_message',
+                'phase': self.PHASE_CODE,
+                'message': '问答环节结束，下面进入代码题环节。'
+            }))
+            # 代码题阶段暂不处理
     
     # 数据库操作方法
     @database_sync_to_async
