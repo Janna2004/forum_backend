@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "users",
     "posts",
     "webrtc",
+    "knowledge_base",
 ]
 
 MIDDLEWARE = [

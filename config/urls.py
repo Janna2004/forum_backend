@@ -23,4 +23,5 @@ urlpatterns = [
     path("users/", include("users.urls")),
     path("posts/", include("posts.urls")),
     path("webrtc/", include("webrtc.urls")),
+    path("knowledge/", include("knowledge_base.urls")),
 ]

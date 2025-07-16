@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>WebRTC 音视频+实时转写测试</title>
+    <style>
+        #video {
+            width: 480px;
+            height: 360px;
+            background: #000;
+        }
+        #transcript {
+            margin-top: 20px;
+            font-size: 1.2em;
+            color: #333;
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 8px;
+            min-height: 40px;
+        }
+    </style>
+</head>
+<body>
+    <h2>WebRTC 音视频+实时转写测试</h2>
+    <video id="video" autoplay playsinline></video>
+    <div id="transcript">转写内容将实时显示在这里...</div>
+    <button id="startBtn">开始采集</button>
+    <button id="stopBtn" disabled>停止采集</button>
+
+    <script>
+        let localStream = null;
+        let ws = null;
+        let audioContext, processor, input;
+        let isRecording = false;
+
+        const video = document.getElementById('video');
+        const transcriptDiv = document.getElementById('transcript');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+
+        startBtn.onclick = async function() {
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            transcriptDiv.textContent = "转写内容将实时显示在这里...";
+            // 获取音视频流
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            video.srcObject = localStream;
+
+            // 连接WebSocket
+            let ws_scheme = window.location.protocol === "https:" ? "wss" : "ws";
+            let ws_url = ws_scheme + '://' + window.location.host + '/ws/webrtc/';
+            ws = new WebSocket(ws_url);
+            ws.onopen = () => {
+                isRecording = true;
+                startAudioProcessing();
+            };
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'asr_result') {
+                        let text = data.text;
+                        // 如果text是JSON字符串，尝试提取所有中文
+                        try {
+                            const obj = typeof text === 'string' ? JSON.parse(text) : text;
+                            // 递归提取所有字符串中的中文
+                            function extractChinese(obj) {
+                                let result = '';
+                                if (typeof obj === 'string') {
+                                    // 匹配所有中文
+                                    result += obj.match(/[\u4e00-\u9fa5，。！？、；：“”‘’（）《》【】]/g)?.join('') || '';
+                                } else if (Array.isArray(obj)) {
+                                    for (const item of obj) result += extractChinese(item);
+                                } else if (typeof obj === 'object' && obj !== null) {
+                                    for (const key in obj) result += extractChinese(obj[key]);
+                                }
+                                return result;
+                            }
+                            text = extractChinese(obj);
+                        } catch (e) {}
+                        transcriptDiv.textContent = text || '[无转写内容]';
+                    }
+                } catch (e) {
+                    // 非JSON消息忽略
+                }
+            };
+            ws.onclose = () => {
+                isRecording = false;
+                stopAudioProcessing();
+            };
+        };
+
+        function startAudioProcessing() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            input = audioContext.createMediaStreamSource(localStream);
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+            input.connect(processor);
+            processor.connect(audioContext.destination);
+
+            let resampleBuffer = [];
+            let sendTimer = null;
+
+            processor.onaudioprocess = function(e) {
+                if (!isRecording) return;
+                const inputData = e.inputBuffer.getChannelData(0);
+                const inputSampleRate = audioContext.sampleRate;
+                const targetSampleRate = 16000;
+                const resampled = downsampleBuffer(inputData, inputSampleRate, targetSampleRate);
+                resampleBuffer = resampleBuffer.concat(Array.from(resampled));
+            };
+
+            // 定时推送，每40ms推送1280字节
+            sendTimer = setInterval(() => {
+                if (!isRecording) return;
+                const chunkSize = 640; // 640采样点*2字节=1280字节
+                while (resampleBuffer.length >= chunkSize) {
+                    const chunk = resampleBuffer.slice(0, chunkSize);
+                    resampleBuffer = resampleBuffer.slice(chunkSize);
+                    let pcm = new Int16Array(chunk.length);
+                    for (let i = 0; i < chunk.length; i++) {
+                        let s = Math.max(-1, Math.min(1, chunk[i]));
+                        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                    let pcmBytes = new Uint8Array(pcm.length * 2);
+                    for (let i = 0; i < pcm.length; i++) {
+                        pcmBytes[2 * i] = pcm[i] & 0xff;
+                        pcmBytes[2 * i + 1] = (pcm[i] >> 8) & 0xff;
+                    }
+                    let base64String = btoa(String.fromCharCode.apply(null, pcmBytes));
+                    if (ws && ws.readyState === 1) {
+                        ws.send(JSON.stringify({type: 'audio_frame', audio_data: base64String}));
+                    }
+                }
+            }, 40);
+
+            function downsampleBuffer(buffer, sampleRate, outRate) {
+                if (outRate === sampleRate) return buffer;
+                const sampleRateRatio = sampleRate / outRate;
+                const newLength = Math.round(buffer.length / sampleRateRatio);
+                const result = new Float32Array(newLength);
+                let offsetResult = 0;
+                let offsetBuffer = 0;
+                while (offsetResult < result.length) {
+                    const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+                    let accum = 0, count = 0;
+                    for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+                        accum += buffer[i];
+                        count++;
+                    }
+                    result[offsetResult] = accum / count;
+                    offsetResult++;
+                    offsetBuffer = nextOffsetBuffer;
+                }
+                return result;
+            }
+
+            window._stopAudioProcessing = function() {
+                if (processor) {
+                    processor.disconnect();
+                    processor = null;
+                }
+                if (input) {
+                    input.disconnect();
+                    input = null;
+                }
+                if (audioContext) {
+                    audioContext.close();
+                    audioContext = null;
+                }
+                if (sendTimer) {
+                    clearInterval(sendTimer);
+                    sendTimer = null;
+                }
+                // 发送结束信号
+                if (ws && ws.readyState === 1) {
+                    ws.send(JSON.stringify({type: 'audio_frame', audio_data: '', end: true}));
+                }
+            }
+        }
+
+        stopBtn.onclick = function() {
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            if (ws) ws.close();
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            if (typeof window._stopAudioProcessing === 'function') window._stopAudioProcessing();
+            transcriptDiv.textContent = "已停止采集";
+        };
+    </script>
+</body>
+</html>

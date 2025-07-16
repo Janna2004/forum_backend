@@ -8,6 +8,7 @@
 - 帖子增删改查（分页）
 - 讯飞大模型AI对话
 - WebRTC视频流处理
+- **智能面试问题生成**（基于讯飞星火+知识库）
 - MySQL数据库支持
 
 ## 安装配置
@@ -79,6 +80,33 @@ python manage.py runserver
 ## webSocet接口使用方法
 
 请查看WebRTC_WebSocket_Testing_Guide.md
+
+## 面试问题生成功能
+
+### 功能说明
+基于讯飞星火大模型和知识库的智能面试问题生成系统，能够根据岗位信息和候选人简历，生成个性化的面试问题。
+
+### 快速开始
+
+1. **初始化知识库**
+```bash
+python manage.py init_knowledge_base
+```
+
+2. **配置讯飞API**
+在 `config/local_settings.py` 中配置讯飞API密钥：
+```python
+XUNFEI_APP_ID = "your_app_id"
+XUNFEI_API_SECRET = "your_api_secret"
+XUNFEI_API_KEY = "your_api_key"
+```
+
+3. **API接口**
+- 生成面试问题：`POST /knowledge/generate-questions/`
+- 获取面试历史：`GET /knowledge/interview-history/`
+- 获取面试详情：`GET /knowledge/interview-detail/{id}/`
+
+详细API文档请查看：`面试问题生成API文档.md`
 
 ## 安全说明
 
