@@ -438,6 +438,11 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         self.last_asr_text = asr_text
         # 重置静默计时
         self.reset_silence_timer()
+        # 推送asr_result消息
+        await self.send(text_data=json.dumps({
+            'type': 'asr_result',
+            'text': asr_text
+        }))
         # 检查“说完了”
         if '说完了' in asr_text:
             if self.phase == self.PHASE_INTRO:
