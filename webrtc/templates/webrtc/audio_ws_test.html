@@ -23,36 +23,79 @@
 <body>
     <h2>WebRTC 音视频+实时转写测试</h2>
     <video id="video" autoplay playsinline></video>
+    <div id="current-question" style="margin-top:20px;font-weight:bold;color:#1976d2;">当前问题：无</div>
     <div id="transcript">转写内容将实时显示在这里...</div>
     <button id="startBtn">开始采集</button>
     <button id="stopBtn" disabled>停止采集</button>
+    <button id="finishBtn" disabled>说完了</button>
 
+    <script src="https://cdn.jsdelivr.net/npm/reconnecting-websocket/dist/reconnecting-websocket.min.js"></script>
     <script>
         let localStream = null;
         let ws = null;
         let audioContext, processor, input;
         let isRecording = false;
+        let currentQuestion = '';
+        let videoFrameTimer = null;
 
         const video = document.getElementById('video');
         const transcriptDiv = document.getElementById('transcript');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
+        const finishBtn = document.getElementById('finishBtn');
+        const questionDiv = document.getElementById('current-question');
+
+        // 新增：JWT登录逻辑
+        async function loginAndGetToken() {
+            try {
+                const resp = await fetch('/users/login/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username: 'testuser1', password: 'password123'})
+                });
+                if (!resp.ok) {
+                    alert('登录失败');
+                    return null;
+                }
+                const data = await resp.json();
+                return data.token; // 取 token 字段
+            } catch (e) {
+                alert('登录请求异常');
+                return null;
+            }
+        }
 
         startBtn.onclick = async function() {
             startBtn.disabled = true;
             stopBtn.disabled = false;
+            finishBtn.disabled = false;
             transcriptDiv.textContent = "转写内容将实时显示在这里...";
+            // 1. 先JWT登录拿token
+            const token = await loginAndGetToken();
+            if (!token) {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                finishBtn.disabled = true;
+                return;
+            }
             // 获取音视频流
             localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             video.srcObject = localStream;
 
-            // 连接WebSocket
+            // 2. 用ReconnectingWebSocket并通过header传token
             let ws_scheme = window.location.protocol === "https:" ? "wss" : "ws";
             let ws_url = ws_scheme + '://' + window.location.host + '/ws/webrtc/';
-            ws = new WebSocket(ws_url);
+            ws = new ReconnectingWebSocket(ws_url, [], {
+                WebSocket: window.WebSocket,
+                connectionTimeout: 1000,
+                maxRetries: 10,
+                headers: {
+                    'Authorization': 'Bearer ' + token
+                }
+            });
             ws.onopen = () => {
-                isRecording = true;
-                startAudioProcessing();
+                // 先发送创建/加入流请求
+                ws.send(JSON.stringify({type: 'create_stream', title: '测试流', description: 'WebRTC测试'}));
             };
             ws.onmessage = (event) => {
                 try {
@@ -78,6 +121,25 @@
                             text = extractChinese(obj);
                         } catch (e) {}
                         transcriptDiv.textContent = text || '[无转写内容]';
+                    } else if (data.type === 'interview_message') {
+                        // 收到面试消息，说明流已创建/加入，可以开始采集和推流
+                        if (!isRecording) {
+                            isRecording = true;
+                            startAudioProcessing();
+                            startVideoFrameSending();
+                        }
+                        // 显示当前问题
+                        if (data.message) {
+                            currentQuestion = data.message;
+                            questionDiv.textContent = '当前问题：' + currentQuestion;
+                        }
+                    } else if (data.type === 'stream_created' || data.type === 'joined_stream') {
+                        // 兼容后端如有stream_created/joined_stream类型
+                        if (!isRecording) {
+                            isRecording = true;
+                            startAudioProcessing();
+                            startVideoFrameSending();
+                        }
                     }
                 } catch (e) {
                     // 非JSON消息忽略
@@ -86,6 +148,8 @@
             ws.onclose = () => {
                 isRecording = false;
                 stopAudioProcessing();
+                stopVideoFrameSending();
+                finishBtn.disabled = true;
             };
         };
 
@@ -178,16 +242,58 @@
             }
         }
 
+        function startVideoFrameSending() {
+            // 每1秒发送一帧视频
+            if (videoFrameTimer) clearInterval(videoFrameTimer);
+            const canvas = document.createElement('canvas');
+            videoFrameTimer = setInterval(() => {
+                if (!isRecording || !localStream) return;
+                const track = localStream.getVideoTracks()[0];
+                if (!track) return;
+                // 截图当前视频帧
+                canvas.width = video.videoWidth || 480;
+                canvas.height = video.videoHeight || 360;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob(blob => {
+                    const reader = new FileReader();
+                    reader.onloadend = function() {
+                        const base64data = reader.result.split(',')[1];
+                        if (ws && ws.readyState === 1) {
+                            ws.send(JSON.stringify({type: 'video_frame', frame_data: base64data, frame_type: 'keyframe'}));
+                        }
+                    };
+                    reader.readAsDataURL(blob);
+                }, 'image/jpeg', 0.8);
+            }, 1000);
+        }
+        function stopVideoFrameSending() {
+            if (videoFrameTimer) {
+                clearInterval(videoFrameTimer);
+                videoFrameTimer = null;
+            }
+        }
+
+        finishBtn.onclick = function() {
+            // 用户点击“说完了”，请求下一个问题
+            if (ws && ws.readyState === 1) {
+                ws.send(JSON.stringify({type: 'request_next_question'}));
+            }
+        };
+
         stopBtn.onclick = function() {
             startBtn.disabled = false;
             stopBtn.disabled = true;
+            finishBtn.disabled = true;
             if (ws) ws.close();
             if (localStream) {
                 localStream.getTracks().forEach(track => track.stop());
                 localStream = null;
             }
             if (typeof window._stopAudioProcessing === 'function') window._stopAudioProcessing();
+            stopVideoFrameSending();
             transcriptDiv.textContent = "已停止采集";
+            questionDiv.textContent = "当前问题：无";
         };
     </script>
 </body>

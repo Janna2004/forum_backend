@@ -49,7 +49,6 @@ class XunfeiSparkService:
             "date": date,
             "host": "spark-api.xf-yun.com"
         }
-        print(f"调试: appid={appid}, api_key={api_key}, ts={ts}, signa={signa}")
     
         # 拼接鉴权参数，生成url
         url = f"{self.spark_url}?{urlencode(v)}"

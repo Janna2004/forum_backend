@@ -13,3 +13,9 @@ uvicorn>=0.35.0
 django-cors-headers>=4.3.0
 requests>=2.31.0
 djangorestframework>=3.14.0
+uvicorn[standard]
+ultralytics
+seaborn
+modelscope
+addict
+datasets>=4.0.0

@@ -70,13 +70,6 @@ python manage.py runserver
 
 但此时WebSocket接口不可用。
 
-#### 常见报错与解决
-
-- **django.core.exceptions.AppRegistryNotReady: Apps aren't loaded yet.**
-  - 解决：确保`config/asgi.py`中`os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')`在所有Django相关导入之前。
-- **WebSocket无法连接/404**
-  - 解决：必须用`uvicorn`或`daphne`启动，`runserver`不支持WebSocket。
-
 ## webSocet接口使用方法
 
 请查看WebRTC_WebSocket_Testing_Guide.md
@@ -84,17 +77,20 @@ python manage.py runserver
 ## 面试问题生成功能
 
 ### 功能说明
+
 基于讯飞星火大模型和知识库的智能面试问题生成系统，能够根据岗位信息和候选人简历，生成个性化的面试问题。
 
 ### 快速开始
 
 1. **初始化知识库**
+
 ```bash
 python manage.py init_knowledge_base
 ```
 
 2. **配置讯飞API**
-在 `config/local_settings.py` 中配置讯飞API密钥：
+   在 `config/local_settings.py` 中配置讯飞API密钥：
+
 ```python
 XUNFEI_APP_ID = "your_app_id"
 XUNFEI_API_SECRET = "your_api_secret"
@@ -102,6 +98,7 @@ XUNFEI_API_KEY = "your_api_key"
 ```
 
 3. **API接口**
+
 - 生成面试问题：`POST /knowledge/generate-questions/`
 - 获取面试历史：`GET /knowledge/interview-history/`
 - 获取面试详情：`GET /knowledge/interview-detail/{id}/`
