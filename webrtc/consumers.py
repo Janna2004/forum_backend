@@ -508,14 +508,19 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             asr_text = extract_chinese(obj)
         except Exception:
             asr_text = str(text)
+        print("[调试] handle_asr_result asr_text:", asr_text)
+        print("[调试] handle_asr_result phase:", self.phase, "current_question:", self.current_question)
         self.last_asr_text = asr_text
         # 重置静默计时
         self.reset_silence_timer()
         # 记录答案（修复通义分析无log）
         if self.phase == self.PHASE_QUESTION and self.current_question and asr_text.strip():
+            print("[调试] handle_asr_result append to current_answer_final:", asr_text.strip())
             self.current_answer_final.append(asr_text.strip())
+        print("[调试] handle_asr_result current_answer_final:", self.current_answer_final)
         # 检查“说完了”
         if '说完了' in asr_text:
+            print("[调试] handle_asr_result 检测到说完了，准备保存答案")
             if self.phase == self.PHASE_INTRO:
                 await self.finish_intro()
             elif self.phase == self.PHASE_QUESTION:
@@ -570,7 +575,10 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             # 代码题阶段暂不处理
 
     async def save_current_answer(self):
+        print("[调试] save_current_answer called, current_question:", self.current_question)
+        print("[调试] save_current_answer called, current_answer_final:", self.current_answer_final)
         if not self.video_stream:
+            print("[调试] save_current_answer异常: video_stream 未初始化")
             return
         if self.current_question and self.current_answer_final:
             answer_text = '\n'.join(self.current_answer_final)
