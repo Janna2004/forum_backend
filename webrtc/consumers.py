@@ -24,6 +24,9 @@ import requests
 from config.local_settings import QWEN_API_KEY
 import os
 import datetime
+import wave
+import ffmpeg
+import numpy as np
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -52,12 +55,16 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         self.current_answer_final = []
         self.current_answer_start_time = None
         self.current_question_idx = 0 # 新增：记录当前问题的序号
+        self.audio_buffer = []
+        self.video_frame_buffer = []
     
     async def connect(self):
         print("[WebRTCConsumer] connect called")
         await self.accept()
+        print("[WebRTCConsumer] connect, self.scope['user']:", self.scope.get('user', None))
+        self.user = await self.get_user() if hasattr(self, 'get_user') else None
+        print("[WebRTCConsumer] connect, self.user:", self.user)
         try:
-            self.user = await self.get_user() if hasattr(self, 'get_user') else None
             self.session_id = str(uuid.uuid4())
             loop = asyncio.get_event_loop()
             self._ws_loop = loop
@@ -385,6 +392,8 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                     'exclude': self.channel_name
                 }
             )
+            if frame_data:
+                self.video_frame_buffer.append(frame_data)
         except Exception as e:
             logger.error(f"处理视频帧失败: {str(e)}")
             await self.send(text_data=json.dumps({
@@ -394,6 +403,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     
     async def handle_audio_frame(self, data):
         """处理音频帧数据，转发到讯飞ASR，推送转写结果"""
+
         try:
             audio_data = data.get('audio_data')  # base64字符串
             is_end = data.get('end', False)
@@ -415,6 +425,8 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                     'type': 'error',
                     'text': 'RTASR未连接'
                 }))
+            if audio_data:
+                self.audio_buffer.append(audio_data)
         except Exception as e:
             await self.send(text_data=json.dumps({
                 'type': 'error',
@@ -543,6 +555,9 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             }))
             self.phase = self.PHASE_QUESTION
             self.start_silence_timer()
+            # 新问题开始时清空buffer
+            self.audio_buffer = []
+            self.video_frame_buffer = []
         else:
             # 保存最后一道题答案
             await self.save_current_answer()
@@ -555,8 +570,8 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             # 代码题阶段暂不处理
 
     async def save_current_answer(self):
-        print("[调试] save_current_answer called, current_question:", self.current_question)
-        print("[调试] save_current_answer called, current_answer_final:", self.current_answer_final)
+        if not self.video_stream:
+            return
         if self.current_question and self.current_answer_final:
             answer_text = '\n'.join(self.current_answer_final)
             print("[调试] answer_text:", answer_text)
@@ -581,18 +596,62 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
 
     async def save_av_clip_for_question(self):
         """
-        保存当前问题的音视频片段到本地文件，返回文件路径。
-        实际实现：这里只做示例，假设你有音视频流buffer或文件，按session_id+问题序号命名。
+        保存当前问题的音视频片段到本地文件，返回带声mp4路径。
         """
-        # 你需要根据实际采集方式获取音视频数据，这里仅做路径示例
         save_dir = './interview_clips'
         os.makedirs(save_dir, exist_ok=True)
         q_idx = getattr(self, 'current_question_idx', 0)
-        filename = f"{self.session_id}_q{q_idx+1}.mp4"
-        av_path = os.path.join(save_dir, filename)
-        # TODO: 实际保存音视频流到av_path
-        # 这里只是预留接口，实际需集成音视频录制/拼接逻辑
-        print(f"[DEBUG] 预期保存音视频片段到: {av_path}")
+        session_id = getattr(self, 'session_id', 'unknown')
+        audio_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}.wav')
+        img_dir = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_frames')
+        os.makedirs(img_dir, exist_ok=True)
+        video_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_av.mp4')
+
+        # 保存音频
+        if self.audio_buffer:
+            pcm_bytes = b''.join([base64.b64decode(chunk) for chunk in self.audio_buffer])
+            with wave.open(audio_path, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(pcm_bytes)
+        else:
+            audio_path = None
+
+        # 保存视频帧
+        img_paths = []
+        if self.video_frame_buffer:
+            for i, b64img in enumerate(self.video_frame_buffer):
+                img_path = os.path.join(img_dir, f'frame_{i:04d}.jpg')
+                with open(img_path, 'wb') as f:
+                    f.write(base64.b64decode(b64img))
+                img_paths.append(img_path)
+
+        # 合成带声mp4
+        if audio_path and img_paths:
+            (
+                ffmpeg
+                .input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
+                .input(audio_path)
+                .output(video_path, vcodec='libx264', acodec='aac', pix_fmt='yuv420p', shortest=None)
+                .run(overwrite_output=True)
+            )
+            av_path = video_path
+        elif audio_path:
+            av_path = audio_path
+        elif img_paths:
+            # 只合成无声视频
+            video_only_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_video.mp4')
+            (
+                ffmpeg
+                .input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
+                .output(video_only_path, vcodec='libx264', pix_fmt='yuv420p')
+                .run(overwrite_output=True)
+            )
+            av_path = video_only_path
+        else:
+            av_path = None
+
         self.current_question_idx = q_idx + 1
         return av_path
 
@@ -601,33 +660,33 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         print("[调试] analyze_confidence_fluency called, question:", question)
         print("[调试] analyze_confidence_fluency called, answer_text:", answer_text)
         print("[调试] analyze_confidence_fluency called, av_path:", av_path)
-        """
-        用qwen2.5-omni-7b分析用户回答的信心和流畅度，打1-5分。
-        1分：极度缺乏信心，表达极不流畅，长时间停顿或语无伦次。
-        2分：信心不足，表达有明显卡顿或多次重复、犹豫。
-        3分：信心一般，表达基本流畅但偶有停顿或语气不坚定。
-        4分：信心较强，表达流畅，偶有小瑕疵。
-        5分：非常有信心，表达极其流畅，思路清晰、语气坚定。
-        """
-        # 构造prompt
         prompt = f"请根据以下面试问题和应答，判断应答者在回答时的信心和表达流畅度，并按如下标准打1-5分：\\n1分：极度缺乏信心，表达极不流畅，长时间停顿或语无伦次。\\n2分：信心不足，表达有明显卡顿或多次重复、犹豫。\\n3分：信心一般，表达基本流畅但偶有停顿或语气不坚定。\\n4分：信心较强，表达流畅，偶有小瑕疵。\\n5分：非常有信心，表达极其流畅，思路清晰、语气坚定。\\n请输出分析理由和分数。\\n\\n面试问题：{question}\\n应答内容：{answer_text}"
         headers = {
-            "Authorization": f"Bearer {QWEN_API_KEY}",
-            "Content-Type": "application/json"
+            "Authorization": f"Bearer {QWEN_API_KEY}"
         }
+        input_data = {"text": prompt}
+        files = {}
+        if av_path and av_path.endswith('.mp4'):
+            files["video"] = open(av_path, "rb")
+        elif av_path and av_path.endswith('.wav'):
+            files["audio"] = open(av_path, "rb")
         payload = {
             "model": "qwen2.5-omni-7b",
-            "input": {
-                "text": prompt
-            }
+            "input": input_data
         }
-        # 预留：如API支持音视频，可在此上传av_path
-        if av_path:
-            print(f"[DEBUG] 可上传音视频文件: {av_path}")
         try:
             response = requests.post(
                 "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
-                headers=headers, json=payload, timeout=30)
+                headers=headers,
+                data={"payload": json.dumps(payload)},
+                files=files if files else None,
+                timeout=30
+            )
+            if files:
+                for f in files.values():
+                    f.close()
+            print("[调试] qwen2.5-omni-7b response status:", response.status_code)
+            print("[调试] qwen2.5-omni-7b response text:", response.text)
             if response.status_code == 200:
                 result = response.json()
                 print("qwen2.5-omni-7b分析结果：", result)
@@ -639,10 +698,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     # 数据库操作方法
     @database_sync_to_async
     def get_user(self):
-        """获取用户信息"""
-        if hasattr(self.scope, 'user'):
-            return self.scope['user']
-        return None
+        return self.scope.get('user', None)
     
     @database_sync_to_async
     def create_video_stream(self, title, description):

@@ -27,7 +27,6 @@
     <div id="transcript">转写内容将实时显示在这里...</div>
     <button id="startBtn">开始采集</button>
     <button id="stopBtn" disabled>停止采集</button>
-    <button id="finishBtn" disabled>说完了</button>
 
     <script src="https://cdn.jsdelivr.net/npm/reconnecting-websocket/dist/reconnecting-websocket.min.js"></script>
     <script>
@@ -37,6 +36,7 @@
         let isRecording = false;
         let currentQuestion = '';
         let videoFrameTimer = null;
+        let canStream = false;
 
         const video = document.getElementById('video');
         const transcriptDiv = document.getElementById('transcript');
@@ -79,20 +79,23 @@
                 return;
             }
             // 获取音视频流
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            video.srcObject = localStream;
-
-            // 2. 用ReconnectingWebSocket并通过header传token
-            let ws_scheme = window.location.protocol === "https:" ? "wss" : "ws";
-            let ws_url = ws_scheme + '://' + window.location.host + '/ws/webrtc/';
-            ws = new ReconnectingWebSocket(ws_url, [], {
-                WebSocket: window.WebSocket,
-                connectionTimeout: 1000,
-                maxRetries: 10,
-                headers: {
-                    'Authorization': 'Bearer ' + token
+            localStream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: {
+                    sampleRate: 16000,
+                    channelCount: 1,
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false
                 }
             });
+            video.srcObject = localStream;
+            canStream = false;
+
+            // 2. 用token拼接到ws url
+            let ws_scheme = window.location.protocol === "https:" ? "wss" : "ws";
+            let ws_url = ws_scheme + '://' + window.location.host + '/ws/webrtc/?token=' + token;
+            ws = new WebSocket(ws_url);
             ws.onopen = () => {
                 // 先发送创建/加入流请求
                 ws.send(JSON.stringify({type: 'create_stream', title: '测试流', description: 'WebRTC测试'}));
@@ -122,19 +125,20 @@
                         } catch (e) {}
                         transcriptDiv.textContent = text || '[无转写内容]';
                     } else if (data.type === 'interview_message') {
-                        // 收到面试消息，说明流已创建/加入，可以开始采集和推流
-                        if (!isRecording) {
+                        // 显示当前问题
+                        if (data.text) {
+                            currentQuestion = data.text;
+                            questionDiv.textContent = '当前问题：' + currentQuestion;
+                        }
+                        // 收到面试消息，说明流已创建/加入，可以开始采集和推流（兼容部分后端）
+                        if (!isRecording && (data.phase === 'intro' || data.phase === 'question') && canStream) {
                             isRecording = true;
                             startAudioProcessing();
                             startVideoFrameSending();
                         }
-                        // 显示当前问题
-                        if (data.message) {
-                            currentQuestion = data.message;
-                            questionDiv.textContent = '当前问题：' + currentQuestion;
-                        }
                     } else if (data.type === 'stream_created' || data.type === 'joined_stream') {
-                        // 兼容后端如有stream_created/joined_stream类型
+                        // 只有收到stream_created/joined_stream才允许推流
+                        canStream = true;
                         if (!isRecording) {
                             isRecording = true;
                             startAudioProcessing();
@@ -147,6 +151,7 @@
             };
             ws.onclose = () => {
                 isRecording = false;
+                canStream = false;
                 stopAudioProcessing();
                 stopVideoFrameSending();
                 finishBtn.disabled = true;
@@ -154,6 +159,7 @@
         };
 
         function startAudioProcessing() {
+            if (!canStream) return;
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             input = audioContext.createMediaStreamSource(localStream);
             processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -243,6 +249,7 @@
         }
 
         function startVideoFrameSending() {
+            if (!canStream) return;
             // 每1秒发送一帧视频
             if (videoFrameTimer) clearInterval(videoFrameTimer);
             const canvas = document.createElement('canvas');
