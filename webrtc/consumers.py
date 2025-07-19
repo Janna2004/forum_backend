@@ -27,6 +27,8 @@ import datetime
 import wave
 import ffmpeg
 import numpy as np
+from requests_toolbelt.multipart.encoder import MultipartEncoder
+from openai import OpenAI
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -513,8 +515,8 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         self.last_asr_text = asr_text
         # 重置静默计时
         self.reset_silence_timer()
-        # 记录答案（修复通义分析无log）
-        if self.phase == self.PHASE_QUESTION and self.current_question and asr_text.strip():
+        # 记录答案（自我介绍和问答阶段都记录）
+        if self.current_question and asr_text.strip():
             print("[调试] handle_asr_result append to current_answer_final:", asr_text.strip())
             self.current_answer_final.append(asr_text.strip())
         print("[调试] handle_asr_result current_answer_final:", self.current_answer_final)
@@ -637,11 +639,11 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
 
         # 合成带声mp4
         if audio_path and img_paths:
+            video_stream = ffmpeg.input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
+            audio_stream = ffmpeg.input(audio_path)
             (
                 ffmpeg
-                .input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
-                .input(audio_path)
-                .output(video_path, vcodec='libx264', acodec='aac', pix_fmt='yuv420p', shortest=None)
+                .output(video_stream, audio_stream, video_path, vcodec='libx264', acodec='aac', pix_fmt='yuv420p', shortest=None)
                 .run(overwrite_output=True)
             )
             av_path = video_path
@@ -669,37 +671,41 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         print("[调试] analyze_confidence_fluency called, answer_text:", answer_text)
         print("[调试] analyze_confidence_fluency called, av_path:", av_path)
         prompt = f"请根据以下面试问题和应答，判断应答者在回答时的信心和表达流畅度，并按如下标准打1-5分：\\n1分：极度缺乏信心，表达极不流畅，长时间停顿或语无伦次。\\n2分：信心不足，表达有明显卡顿或多次重复、犹豫。\\n3分：信心一般，表达基本流畅但偶有停顿或语气不坚定。\\n4分：信心较强，表达流畅，偶有小瑕疵。\\n5分：非常有信心，表达极其流畅，思路清晰、语气坚定。\\n请输出分析理由和分数。\\n\\n面试问题：{question}\\n应答内容：{answer_text}"
-        headers = {
-            "Authorization": f"Bearer {QWEN_API_KEY}"
-        }
-        input_data = {"text": prompt}
-        files = {}
-        if av_path and av_path.endswith('.mp4'):
-            files["video"] = open(av_path, "rb")
-        elif av_path and av_path.endswith('.wav'):
-            files["audio"] = open(av_path, "rb")
-        payload = {
-            "model": "qwen2.5-omni-7b",
-            "input": input_data
-        }
         try:
-            response = requests.post(
-                "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
-                headers=headers,
-                data={"payload": json.dumps(payload)},
-                files=files if files else None,
-                timeout=30
+            client = OpenAI(
+                api_key=QWEN_API_KEY,
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             )
-            if files:
-                for f in files.values():
-                    f.close()
-            print("[调试] qwen2.5-omni-7b response status:", response.status_code)
-            print("[调试] qwen2.5-omni-7b response text:", response.text)
-            if response.status_code == 200:
-                result = response.json()
-                print("qwen2.5-omni-7b分析结果：", result)
-            else:
-                print(f"qwen2.5-omni-7b API调用失败: {response.status_code} {response.text}")
+            
+            # 构建消息内容
+            content = [{"type": "text", "text": prompt}]
+            
+            # 如果有视频文件，添加为base64编码的内容
+            if av_path and av_path.endswith('.mp4'):
+                with open(av_path, "rb") as f:
+                    video_bytes = f.read()
+                video_b64 = base64.b64encode(video_bytes).decode('utf-8')
+                content.append({
+                    "type": "video_url",
+                    "video_url": {
+                        "url": f"data:;base64,{video_b64}"
+                    }
+                })
+            
+            completion = client.chat.completions.create(
+                model="qwen2.5-omni-7b",
+                messages=[{"role": "user", "content": content}],
+                modalities=["text"],
+                stream=True
+            )
+            
+            # 处理流式响应
+            full_response = ""
+            for chunk in completion:
+                if chunk.choices[0].delta.content:
+                    full_response += chunk.choices[0].delta.content
+            
+            print("[调试] qwen2.5-omni-7b分析结果：", full_response)
         except Exception as e:
             print(f"qwen2.5-omni-7b API调用异常: {e}")
     
