@@ -49,7 +49,6 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         self.rtasr_client = None  # 讯飞RTASR实例
         self.question_queue = []  # 面试问题队列
         self.phase = self.PHASE_INTRO
-        self.silence_timer = None
         self.last_asr_text = ''
         self._ws_loop = None
         self.current_question = None
@@ -97,7 +96,6 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 'text': '请开始自我介绍吧'
             }))
             self.phase = self.PHASE_INTRO
-            self.start_silence_timer()
         except Exception as e:
             print(f"[WebRTCConsumer] connect error: {e}")
             await self.send(text_data=json.dumps({'type': 'error', 'text': f'初始化失败: {e}'}))
@@ -473,23 +471,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"断开连接失败: {str(e)}")
     
-    def start_silence_timer(self, timeout=15):
-        if self.silence_timer:
-            self.silence_timer.cancel()
-        loop = self._ws_loop or asyncio.get_event_loop()
-        self.silence_timer = loop.call_later(timeout, lambda: asyncio.run_coroutine_threadsafe(self.handle_silence(), loop))
 
-    def reset_silence_timer(self, timeout=15):
-        self.start_silence_timer(timeout)
-
-    async def handle_silence(self):
-        # 15s无语音，自动切换阶段
-        if self.phase == self.PHASE_INTRO:
-            await self.finish_intro()
-        elif self.phase == self.PHASE_QUESTION:
-            await self.save_current_answer()
-            await self.next_question()
-        # 代码题阶段暂不处理
 
     async def handle_asr_result(self, text):
         # 只处理中文文本
@@ -513,8 +495,6 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         print("[调试] handle_asr_result asr_text:", asr_text)
         print("[调试] handle_asr_result phase:", self.phase, "current_question:", self.current_question)
         self.last_asr_text = asr_text
-        # 重置静默计时
-        self.reset_silence_timer()
         # 记录答案（自我介绍和问答阶段都记录）
         if self.current_question and asr_text.strip():
             print("[调试] handle_asr_result append to current_answer_final:", asr_text.strip())
@@ -536,8 +516,6 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
 
     async def finish_intro(self):
         self.phase = self.PHASE_QUESTION
-        if self.silence_timer:
-            self.silence_timer.cancel()
         await self.send(text_data=json.dumps({
             'type': 'interview_message',
             'phase': self.PHASE_QUESTION,
@@ -547,8 +525,6 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         await self.next_question()
 
     async def next_question(self):
-        if self.silence_timer:
-            self.silence_timer.cancel()
         if self.question_queue:
             self.current_question = self.question_queue.pop(0)
             self.current_answer_sentences = []
@@ -561,7 +537,6 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 'text': self.current_question
             }))
             self.phase = self.PHASE_QUESTION
-            self.start_silence_timer()
             # 新问题开始时清空buffer
             self.audio_buffer = []
             self.video_frame_buffer = []
