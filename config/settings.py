@@ -37,19 +37,19 @@ except ImportError:
 # Application definition
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
-    "django.contrib.staticfiles",
-    "corsheaders",
-    "channels",
-    "users",
-    "posts",
-    "webrtc",
-    "code",
-    "knowledge_base",
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'rest_framework',
+    'corsheaders',
+    'users',
+    'posts',
+    'webrtc',
+    'knowledge_base',
+    'interviews',  # 新增面试应用
 ]
 
 MIDDLEWARE = [
@@ -145,6 +145,27 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # URL配置
 APPEND_SLASH = True  # 恢复为True，使用中间件处理
+
+# REST framework配置
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+}
+
+# JWT配置
+from datetime import timedelta
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': False,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+}
 
 # CORS配置
 CORS_ALLOW_ALL_ORIGINS = True  # 开发环境允许所有源

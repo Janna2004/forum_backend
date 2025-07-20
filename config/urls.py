@@ -20,11 +20,10 @@ from django.urls import path, include
 
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    # 原始URL配置
-    path("users/", include("users.urls")),
-    path("posts/", include("posts.urls")),
-    path("webrtc/", include("webrtc.urls")),
-    path("code/", include("code.urls")),
-    path("knowledge/", include("knowledge_base.urls")),
+    path('admin/', admin.site.urls),
+    path('users/', include('users.urls')),
+    path('posts/', include('posts.urls')),
+    path('webrtc/', include('webrtc.urls')),
+    path('knowledge-base/', include('knowledge_base.urls')),
+    path('interviews/', include('interviews.urls')),  # 新增面试接口URL
 ]

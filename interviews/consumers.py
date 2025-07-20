@@ -4,10 +4,8 @@ import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
-from .models import VideoStream, WebRTCConnection  # type: ignore
-from .services import webrtc_service
-from interviews.services import XunfeiRTASRClient
-from interviews.models import InterviewAnswer
+from .models import Interview, InterviewAnswer
+from .services import XunfeiRTASRClient
 import uuid
 import base64
 from knowledge_base.services import KnowledgeBaseService
@@ -35,8 +33,8 @@ from openai import OpenAI
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
-class WebRTCConsumer(AsyncWebsocketConsumer):
-    """WebRTC WebSocket消费者"""
+class InterviewConsumer(AsyncWebsocketConsumer):
+    """面试专用WebSocket消费者"""
     PHASE_INTRO = 'intro'
     PHASE_QUESTION = 'question'
     PHASE_CODE = 'code'
@@ -45,10 +43,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         super().__init__(*args, **kwargs)
         self.user = None
         self.session_id = None
-        self.peer_id = None
-        self.video_stream = None
-        self.connection = None
-        self.interview_id = None  # 面试ID
+        self.interview = None
         self.rtasr_client = None  # 讯飞RTASR实例
         self.question_queue = []  # 面试问题队列
         self.phase = self.PHASE_INTRO
@@ -64,11 +59,11 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         self.video_frame_buffer = []
     
     async def connect(self):
-        print("[WebRTCConsumer] connect called")
+        print("[InterviewConsumer] connect called")
         await self.accept()
-        print("[WebRTCConsumer] connect, self.scope['user']:", self.scope.get('user', None))
+        print("[InterviewConsumer] connect, self.scope['user']:", self.scope.get('user', None))
         self.user = await self.get_user() if hasattr(self, 'get_user') else None
-        print("[WebRTCConsumer] connect, self.user:", self.user)
+        print("[InterviewConsumer] connect, self.user:", self.user)
         try:
             self.session_id = str(uuid.uuid4())
             loop = asyncio.get_event_loop()
@@ -78,12 +73,12 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 asyncio.run_coroutine_threadsafe(self.handle_asr_result(text), loop)
             def start_rtasr():
                 try:
-                    print("[WebRTCConsumer] RTASR ws connecting...")
+                    print("[InterviewConsumer] RTASR ws connecting...")
                     self.rtasr_client = XunfeiRTASRClient(app_id='08425c8a', api_key='c64481ae5aac8c1ad9993125c7a6fdbc', on_result=on_rtasr_result)
                     self.rtasr_client.connect()
-                    print("[WebRTCConsumer] RTASR ws connected")
+                    print("[InterviewConsumer] RTASR ws connected")
                 except Exception as e:
-                    print(f"[WebRTCConsumer] RTASR ws connect error: {e}")
+                    print(f"[InterviewConsumer] RTASR ws connect error: {e}")
                     asyncio.run_coroutine_threadsafe(
                         self.send(text_data=json.dumps({'type': 'asr_result', 'text': f'[RTASR连接失败] {e}'})), loop)
             threading.Thread(target=start_rtasr, daemon=True).start()
@@ -91,7 +86,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({
                 'type': 'connection_established',
                 'session_id': self.session_id,
-                'text': 'WebRTC连接已建立'
+                'text': 'Interview连接已建立'
             }))
             # 主动推送面试官开场白
             await self.send(text_data=json.dumps({
@@ -102,28 +97,24 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             self.phase = self.PHASE_INTRO
             self.start_silence_timer()
         except Exception as e:
-            print(f"[WebRTCConsumer] connect error: {e}")
+            print(f"[InterviewConsumer] connect error: {e}")
             await self.send(text_data=json.dumps({'type': 'error', 'text': f'初始化失败: {e}'}))
     
     async def disconnect(self, close_code):
-        print(f"[WebRTCConsumer] disconnect called, code={close_code}")
+        print(f"[InterviewConsumer] disconnect called, code={close_code}")
         """断开WebSocket连接"""
         try:
             if self.rtasr_client:
-                print("[WebRTCConsumer] closing RTASR ws...")
+                print("[InterviewConsumer] closing RTASR ws...")
                 try:
                     self.rtasr_client.close()
-                    print("[WebRTCConsumer] RTASR ws closed")
+                    print("[InterviewConsumer] RTASR ws closed")
                 except Exception as e:
-                    print(f"[WebRTCConsumer] RTASR ws close error: {e}")
-            if self.connection:
-                await self.update_connection_state('disconnected')
-            if self.video_stream:
-                await self.deactivate_video_stream()
-            logger.info(f"WebRTC连接已断开: {self.user.username if self.user else 'Unknown'} - {close_code}")
+                    print(f"[InterviewConsumer] RTASR ws close error: {e}")
+            logger.info(f"Interview连接已断开: {self.user.username if self.user else 'Unknown'} - {close_code}")
         except Exception as e:
             logger.error(f"断开连接时出错: {str(e)}")
-            print(f"[WebRTCConsumer] disconnect error: {e}")
+            print(f"[InterviewConsumer] disconnect error: {e}")
     
     async def receive(self, text_data):
         """接收WebSocket消息"""
@@ -131,20 +122,12 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             data = json.loads(text_data)
             message_type = data.get('type')
             
-            if message_type == 'create_stream':
-                await self.handle_create_stream(data)
-            elif message_type == 'join_stream':
-                await self.handle_join_stream(data)
-            elif message_type == 'offer':
-                await self.handle_offer(data)
-            elif message_type == 'answer':
-                await self.handle_answer(data)
-            elif message_type == 'ice_candidate':
-                await self.handle_ice_candidate(data)
-            elif message_type == 'video_frame':
-                await self.handle_video_frame(data)
+            if message_type == 'start_interview':
+                await self.handle_start_interview(data)
             elif message_type == 'audio_frame':
                 await self.handle_audio_frame(data)
+            elif message_type == 'video_frame':
+                await self.handle_video_frame(data)
             elif message_type == 'request_next_question':
                 await self.handle_request_next_question()
             elif message_type == 'disconnect':
@@ -156,186 +139,59 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 }))
                 
         except json.JSONDecodeError:
-            print("[WebRTCConsumer] receive JSON decode error")
+            print("[InterviewConsumer] receive JSON decode error")
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'text': '无效的JSON格式'
             }))
         except Exception as e:
             logger.error(f"处理消息时出错: {str(e)}")
-            print(f"[WebRTCConsumer] receive error: {e}")
+            print(f"[InterviewConsumer] receive error: {e}")
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'text': f'处理消息时出错: {str(e)}'
             }))
-    
-    async def handle_create_stream(self, data):
-        """处理创建视频流请求"""
+
+    async def handle_start_interview(self, data):
+        """处理开始面试请求"""
         try:
-            title = data.get('title', '未命名流')
-            description = data.get('description', '')
-            self.interview_id = data.get('interview_id')  # 获取面试ID
-            
-            if not self.interview_id:
-                raise ValueError("缺少面试ID")
-            
-            # 创建视频流
-            self.video_stream = await self.create_video_stream(title, description)
-            
-            # 创建WebRTC连接记录
-            self.connection = await self.create_connection()
-            
-            await self.send(text_data=json.dumps({
-                'type': 'stream_created',
-                'stream_id': str(self.video_stream.id),
-                'title': self.video_stream.title,
-                'interview_id': self.interview_id,
-                'text': '视频流创建成功'
-            }))
-            
-        except Exception as e:
-            logger.error(f"创建视频流失败: {str(e)}")
-            await self.send(text_data=json.dumps({
-                'type': 'error',
-                'text': f'创建视频流失败: {str(e)}'
-            }))
-    
-    async def handle_join_stream(self, data):
-        """处理加入视频流请求"""
-        try:
-            stream_id = data.get('stream_id')
-            if not stream_id:
+            interview_id = data.get('interview_id')
+            if not interview_id:
                 await self.send(text_data=json.dumps({
                     'type': 'error',
-                    'text': '缺少流ID'
+                    'text': '缺少面试ID'
                 }))
                 return
             
-            # 获取视频流
-            self.video_stream = await self.get_video_stream(stream_id)
-            if not self.video_stream:
+            # 获取面试记录
+            self.interview = await self.get_interview(interview_id)
+            if not self.interview:
                 await self.send(text_data=json.dumps({
                     'type': 'error',
-                    'text': '视频流不存在'
+                    'text': '面试记录不存在'
                 }))
                 return
             
-            # 创建连接记录
-            self.connection = await self.create_connection()
-            
             await self.send(text_data=json.dumps({
-                'type': 'stream_joined',
-                'stream_id': str(self.video_stream.id),
-                'title': self.video_stream.title,
-                'text': '成功加入视频流'
+                'type': 'interview_started',
+                'interview_id': interview_id,
+                'text': '面试已开始'
             }))
             
         except Exception as e:
-            logger.error(f"加入视频流失败: {str(e)}")
+            logger.error(f"开始面试失败: {str(e)}")
             await self.send(text_data=json.dumps({
                 'type': 'error',
-                'text': f'加入视频流失败: {str(e)}'
+                'text': f'开始面试失败: {str(e)}'
             }))
-    
-    async def handle_offer(self, data):
-        """处理WebRTC offer"""
-        try:
-            offer = data.get('offer')
-            if not offer:
-                await self.send(text_data=json.dumps({
-                    'type': 'error',
-                    'text': '缺少offer数据'
-                }))
-                return
-            
-            # 更新连接状态
-            await self.update_connection_state('connecting')
-            
-            # 广播offer给其他连接
-            await self.channel_layer.group_send(
-                f"stream_{self.video_stream.id}",
-                {
-                    'type': 'broadcast_offer',
-                    'offer': offer,
-                    'peer_id': self.peer_id,
-                    'exclude': self.channel_name
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"处理offer失败: {str(e)}")
-            await self.send(text_data=json.dumps({
-                'type': 'error',
-                'text': f'处理offer失败: {str(e)}'
-            }))
-    
-    async def handle_answer(self, data):
-        """处理WebRTC answer"""
-        try:
-            answer = data.get('answer')
-            target_peer = data.get('target_peer')
-            
-            if not answer or not target_peer:
-                await self.send(text_data=json.dumps({
-                    'type': 'error',
-                    'text': '缺少answer或target_peer数据'
-                }))
-                return
-            
-            # 发送answer给目标peer
-            await self.channel_layer.send(
-                target_peer,
-                {
-                    'type': 'send_answer',
-                    'answer': answer,
-                    'peer_id': self.peer_id
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"处理answer失败: {str(e)}")
-            await self.send(text_data=json.dumps({
-                'type': 'error',
-                'text': f'处理answer失败: {str(e)}'
-            }))
-    
-    async def handle_ice_candidate(self, data):
-        """处理ICE候选"""
-        try:
-            candidate = data.get('candidate')
-            target_peer = data.get('target_peer')
-            
-            if not candidate or not target_peer:
-                await self.send(text_data=json.dumps({
-                    'type': 'error',
-                    'text': '缺少candidate或target_peer数据'
-                }))
-                return
-            
-            # 发送ICE候选给目标peer
-            await self.channel_layer.send(
-                target_peer,
-                {
-                    'type': 'send_ice_candidate',
-                    'candidate': candidate,
-                    'peer_id': self.peer_id
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"处理ICE候选失败: {str(e)}")
-            await self.send(text_data=json.dumps({
-                'type': 'error',
-                'text': f'处理ICE候选失败: {str(e)}'
-            }))
-    
+
     async def handle_video_frame(self, data):
         """处理视频帧数据，集成YOLOv11和原生PyTorch情绪识别"""
-        # 检查video_stream是否已初始化
-        if not hasattr(self, 'video_stream') or self.video_stream is None:
+        # 检查interview是否已初始化
+        if not hasattr(self, 'interview') or self.interview is None:
             await self.send(text_data=json.dumps({
                 'type': 'error',
-                'text': '未初始化视频流，请先创建或加入视频流'
+                'text': '未初始化面试，请先开始面试'
             }))
             return
         try:
@@ -377,28 +233,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 return
             elif len(persons) == 1:
                 pass  # 目前不做任何处理
-            # 2. 原生PyTorch情绪识别
-            # self.load_fer_model() # 删除VGG/FER2013相关代码
-            # x1, y1, x2, y2 = map(int, persons[0][:4])
-            # face_img = img[y1:y2, x1:x2]
-            # if face_img.size == 0:
-            #     print('未检测到有效人脸区域')
-            # else:
-            #     emotion_idx, emotion_name = self.predict_emotion(face_img)
-            #     print(f'情绪类别: {emotion_name}（索引: {emotion_idx}）')
-            # 保存视频帧
-            await self.save_video_frame(img_bytes, frame_type)
-            # 广播给其他观看者
-            await self.channel_layer.group_send(
-                f"stream_{self.video_stream.id}",
-                {
-                    'type': 'broadcast_video_frame',
-                    'frame_data': frame_data,
-                    'frame_type': frame_type,
-                    'peer_id': self.peer_id,
-                    'exclude': self.channel_name
-                }
-            )
+
             if frame_data:
                 self.video_frame_buffer.append(frame_data)
         except Exception as e:
@@ -472,7 +307,6 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     async def handle_disconnect(self, data):
         """处理断开连接请求"""
         try:
-            await self.update_connection_state('disconnected')
             await self.close(code=1000)
             
         except Exception as e:
@@ -525,7 +359,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             print("[调试] handle_asr_result append to current_answer_final:", asr_text.strip())
             self.current_answer_final.append(asr_text.strip())
         print("[调试] handle_asr_result current_answer_final:", self.current_answer_final)
-        # 检查“说完了”
+        # 检查"说完了"
         if '说完了' in asr_text:
             print("[调试] handle_asr_result 检测到说完了，准备保存答案")
             if self.phase == self.PHASE_INTRO:
@@ -584,18 +418,15 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     async def save_current_answer(self):
         print("[调试] save_current_answer called, current_question:", self.current_question)
         print("[调试] save_current_answer called, current_answer_final:", self.current_answer_final)
-        if not self.video_stream:
-            print("[调试] save_current_answer异常: video_stream 未初始化")
+        if not self.interview:
+            print("[调试] save_current_answer异常: interview 未初始化")
             return
         if self.current_question and self.current_answer_final:
             answer_text = '\n'.join(self.current_answer_final)
             print("[调试] answer_text:", answer_text)
             try:
-                from interviews.models import Interview, InterviewAnswer
-                # 获取面试记录
-                interview = await database_sync_to_async(Interview.objects.get)(id=self.interview_id)
                 await database_sync_to_async(InterviewAnswer.objects.create)(
-                    interview=interview,
+                    interview=self.interview,
                     user=self.user,
                     question=self.current_question,
                     answer=answer_text
@@ -718,95 +549,9 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         return self.scope.get('user', None)
     
     @database_sync_to_async
-    def create_video_stream(self, title, description):
-        """创建视频流"""
-        return VideoStream.objects.create(  # type: ignore
-            user=self.user,
-            title=title,
-            description=description,
-            is_active=True
-        )
-    
-    @database_sync_to_async
-    def get_video_stream(self, stream_id):
-        """获取视频流"""
+    def get_interview(self, interview_id):
+        """获取面试记录"""
         try:
-            return VideoStream.objects.get(id=stream_id, is_active=True)  # type: ignore
-        except VideoStream.DoesNotExist:  # type: ignore
-            return None
-    
-    @database_sync_to_async
-    def create_connection(self):
-        """创建WebRTC连接记录"""
-        return WebRTCConnection.objects.create(  # type: ignore
-            video_stream=self.video_stream,
-            session_id=self.session_id,
-            peer_id=self.peer_id or str(uuid.uuid4()),
-            connection_state='new'
-        )
-    
-    @database_sync_to_async
-    def update_connection_state(self, state):
-        """更新连接状态"""
-        if self.connection:
-            self.connection.connection_state = state
-            self.connection.save()
-    
-    @database_sync_to_async
-    def deactivate_video_stream(self):
-        """停用视频流"""
-        if self.video_stream:
-            self.video_stream.is_active = False
-            self.video_stream.save()
-    
-    @database_sync_to_async
-    def save_video_frame(self, frame_data, frame_type):
-        """保存视频帧"""
-        from .models import VideoFrame  # type: ignore
-        # 确保frame_data是bytes格式，因为VideoFrame.frame_data是BinaryField
-        if isinstance(frame_data, str):
-            # 如果是base64字符串，先解码为bytes
-            if frame_data.startswith('data:image'):
-                frame_data = frame_data.split(',', 1)[-1]
-            frame_data = base64.b64decode(frame_data)
-        elif not isinstance(frame_data, bytes):
-            frame_data = bytes(frame_data)
-        return VideoFrame.objects.create(  # type: ignore
-            video_stream=self.video_stream,
-            frame_data=frame_data,
-            frame_type=frame_type
-        )
-    
-    # 广播方法
-    async def broadcast_offer(self, event):
-        """广播offer"""
-        await self.send(text_data=json.dumps({
-            'type': 'offer',
-            'offer': event['offer'],
-            'peer_id': event['peer_id']
-        }))
-    
-    async def send_answer(self, event):
-        """发送answer"""
-        await self.send(text_data=json.dumps({
-            'type': 'answer',
-            'answer': event['answer'],
-            'peer_id': event['peer_id']
-        }))
-    
-    async def send_ice_candidate(self, event):
-        """发送ICE候选"""
-        await self.send(text_data=json.dumps({
-            'type': 'ice_candidate',
-            'candidate': event['candidate'],
-            'peer_id': event['peer_id']
-        }))
-    
-    async def broadcast_video_frame(self, event):
-        """广播视频帧"""
-        await self.send(text_data=json.dumps({
-            'type': 'video_frame',
-            'frame_data': event['frame_data'],
-            'frame_type': event['frame_type'],
-            'peer_id': event['peer_id']
-        })) 
+            return Interview.objects.get(id=interview_id)
+        except Interview.DoesNotExist:
+            return None 

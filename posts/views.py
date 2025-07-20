@@ -2,7 +2,8 @@
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from users.views import jwt_required
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from .models import Post, Reply
 import json
 from django.core.paginator import Paginator
@@ -21,10 +22,9 @@ from django.conf import settings
 # Create your views here.
 
 @csrf_exempt
-@jwt_required
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def create_post(request):
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         data = json.loads(request.body.decode())
         title = data.get('title')
@@ -37,10 +37,9 @@ def create_post(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@api_view(['POST', 'DELETE'])
+@permission_classes([IsAuthenticated])
 def delete_post(request, post_id):
-    if request.method not in ['POST', 'DELETE']:
-        return JsonResponse({'error': '仅支持POST或DELETE请求'}, status=405)
     try:
         post = Post.objects.get(id=post_id)
         if post.author != request.user:
@@ -53,10 +52,9 @@ def delete_post(request, post_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def update_post(request, post_id):
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         post = Post.objects.get(id=post_id)
         if post.author != request.user:
@@ -76,9 +74,8 @@ def update_post(request, post_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
+@api_view(['GET'])
 def list_posts(request):
-    if request.method != 'GET':
-        return JsonResponse({'error': '仅支持GET请求'}, status=405)
     try:
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('page_size', 10))
@@ -107,10 +104,9 @@ def list_posts(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
+@api_view(['GET'])
 def get_post_detail(request, post_id):
     """获取帖子详细信息，包含所有回复"""
-    if request.method != 'GET':
-        return JsonResponse({'error': '仅支持GET请求'}, status=405)
     try:
         post = get_object_or_404(Post, id=post_id)
         
@@ -155,11 +151,10 @@ def get_post_detail(request, post_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def create_reply(request, post_id):
     """创建回复"""
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         post = get_object_or_404(Post, id=post_id)
         data = json.loads(request.body.decode())
@@ -204,11 +199,10 @@ def create_reply(request, post_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def update_reply(request, reply_id):
     """更新回复"""
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         reply = get_object_or_404(Reply, id=reply_id)
         
@@ -242,11 +236,10 @@ def update_reply(request, reply_id):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@api_view(['POST', 'DELETE'])
+@permission_classes([IsAuthenticated])
 def delete_reply(request, reply_id):
     """删除回复"""
-    if request.method not in ['POST', 'DELETE']:
-        return JsonResponse({'error': '仅支持POST或DELETE请求'}, status=405)
     try:
         reply = get_object_or_404(Reply, id=reply_id)
         
@@ -255,7 +248,11 @@ def delete_reply(request, reply_id):
             return JsonResponse({'error': '无权限删除他人回复'}, status=403)
         
         reply.delete()
-        return JsonResponse({'success': True, 'msg': '回复删除成功'})
+        
+        return JsonResponse({
+            'success': True,
+            'msg': '回复删除成功'
+        })
         
     except Reply.DoesNotExist:
         return JsonResponse({'error': '回复不存在'}, status=404)

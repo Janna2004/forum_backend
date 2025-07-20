@@ -75,21 +75,4 @@ class VideoFrame(models.Model):  # type: ignore
     def __str__(self):
         return f"{self.video_stream.title} - {self.timestamp}"
 
-class InterviewAnswer(models.Model):  # type: ignore
-    """面试答题记录"""
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    video_stream = models.ForeignKey(VideoStream, on_delete=models.CASCADE, related_name='answers', verbose_name='面试流')  # type: ignore
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='interview_answers', verbose_name='用户')  # type: ignore
-    question = models.TextField(verbose_name='问题')
-    answer = models.TextField(verbose_name='答案')
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='答题时间')
 
-    class Meta:
-        verbose_name = '面试答题记录'
-        verbose_name_plural = '面试答题记录'
-        ordering = ['created_at']
-
-    def __str__(self):
-        user_str = getattr(self.user, 'username', str(self.user))
-        question_str = str(self.question)[:10] if self.question else ''
-        return f"{user_str} - {question_str}..."

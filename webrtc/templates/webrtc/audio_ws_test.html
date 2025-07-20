@@ -18,14 +18,20 @@
             border-radius: 8px;
             min-height: 40px;
         }
+        .status {
+            color: #1976d2;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
     <h2>WebRTC 音视频+实时转写测试</h2>
+    <div class="status">面试ID: <span id="interviewId">未创建</span></div>
     <video id="video" autoplay playsinline></video>
     <div id="current-question" style="margin-top:20px;font-weight:bold;color:#1976d2;">当前问题：无</div>
     <div id="transcript">转写内容将实时显示在这里...</div>
-    <button id="startBtn">开始采集</button>
+    <button id="createInterviewBtn">创建面试</button>
+    <button id="startBtn" disabled>开始采集</button>
     <button id="stopBtn" disabled>停止采集</button>
     <button id="finishBtn" disabled>说完了</button>
 
@@ -38,13 +44,16 @@
         let currentQuestion = '';
         let videoFrameTimer = null;
         let canStream = false;
+        let currentInterviewId = null;
 
         const video = document.getElementById('video');
         const transcriptDiv = document.getElementById('transcript');
+        const createInterviewBtn = document.getElementById('createInterviewBtn');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const finishBtn = document.getElementById('finishBtn');
         const questionDiv = document.getElementById('current-question');
+        const interviewIdSpan = document.getElementById('interviewId');
 
         // 新增：JWT登录逻辑
         async function loginAndGetToken() {
@@ -66,11 +75,57 @@
             }
         }
 
+        // 新增：创建面试
+        createInterviewBtn.onclick = async function() {
+            const token = await loginAndGetToken();
+            if (!token) return;
+
+            try {
+                const resp = await fetch('/interviews/create/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        position_name: '测试岗位',
+                        position_type: 'backend',
+                        position_description: '这是一个测试面试',
+                        company_name: '测试公司'
+                    })
+                });
+
+                if (!resp.ok) {
+                    alert('创建面试失败');
+                    return;
+                }
+
+                const data = await resp.json();
+                console.log('创建面试响应:', data);  // 添加调试日志
+                currentInterviewId = data.id;
+                if (!currentInterviewId) {
+                    alert('创建面试失败：未获取到面试ID');
+                    return;
+                }
+                interviewIdSpan.textContent = currentInterviewId;
+                startBtn.disabled = false;
+                createInterviewBtn.disabled = true;
+            } catch (e) {
+                alert('创建面试请求异常');
+            }
+        };
+
         startBtn.onclick = async function() {
+            if (!currentInterviewId) {
+                alert('请先创建面试');
+                return;
+            }
+
             startBtn.disabled = true;
             stopBtn.disabled = false;
             finishBtn.disabled = false;
             transcriptDiv.textContent = "转写内容将实时显示在这里...";
+            
             // 1. 先JWT登录拿token
             const token = await loginAndGetToken();
             if (!token) {
@@ -98,8 +153,14 @@
             let ws_url = ws_scheme + '://' + window.location.host + '/ws/webrtc/?token=' + token;
             ws = new WebSocket(ws_url);
             ws.onopen = () => {
-                // 先发送创建/加入流请求
-                ws.send(JSON.stringify({type: 'create_stream', title: '测试流', description: 'WebRTC测试'}));
+                console.log('WebSocket已连接，发送创建流请求，面试ID:', currentInterviewId);  // 添加调试日志
+                // 先发送创建/加入流请求，带上面试ID
+                ws.send(JSON.stringify({
+                    type: 'create_stream',
+                    title: '测试流',
+                    description: 'WebRTC测试',
+                    interview_id: currentInterviewId
+                }));
             };
             ws.onmessage = (event) => {
                 try {
@@ -114,7 +175,7 @@
                                 let result = '';
                                 if (typeof obj === 'string') {
                                     // 匹配所有中文
-                                    result += obj.match(/[\u4e00-\u9fa5，。！？、；：“”‘’（）《》【】]/g)?.join('') || '';
+                                    result += obj.match(/[\u4e00-\u9fa5，。！？、；：""''（）《》【】]/g)?.join('') || '';
                                 } else if (Array.isArray(obj)) {
                                     for (const item of obj) result += extractChinese(item);
                                 } else if (typeof obj === 'object' && obj !== null) {

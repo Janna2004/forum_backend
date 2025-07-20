@@ -2354,6 +2354,80 @@ paths:
           headers: {}
       security:
         - BearerAuth: []
+  /interviews/:
+    $ref: '#/components/pathItems/Interviews'
+  /interviews/create/:
+    post:
+      tags:
+        - interviews
+      summary: 创建面试
+      description: 创建一个新的面试记录
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                job_position_id:
+                  type: integer
+                  description: 关联的岗位ID（可选）
+                interview_time:
+                  type: string
+                  format: date-time
+                  description: 面试时间（可选，默认为当前时间）
+                position_name:
+                  type: string
+                  description: 岗位名称
+                position_type:
+                  type: string
+                  enum: [backend, frontend, pm, qa, algo]
+                  description: 岗位类型
+                company_name:
+                  type: string
+                  description: 公司名称（可选）
+                position_description:
+                  type: string
+                  description: 岗位详细信息
+                position_requirements:
+                  type: string
+                  description: 岗位要求（可选）
+              required:
+                - position_name
+                - position_type
+                - position_description
+      responses:
+        '201':
+          description: 面试创建成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    description: 面试ID
+                  interview_time:
+                    type: string
+                    format: date-time
+                    description: 面试时间
+                  position_name:
+                    type: string
+                    description: 岗位名称
+                  company_name:
+                    type: string
+                    description: 公司名称
+                  position_type:
+                    type: string
+                    description: 岗位类型
+        '400':
+          description: 请求参数错误
+        '401':
+          description: 未认证
+        '403':
+          description: 权限不足
 components:
   schemas: {}
   securitySchemes:

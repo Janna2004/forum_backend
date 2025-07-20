@@ -5,10 +5,12 @@ from django.contrib.auth import get_user_model
 from .models import Resume, WorkExperience, ProjectExperience, EducationExperience, CustomSection
 import json
 from django.contrib.auth import authenticate
-import jwt
 from django.conf import settings
 from datetime import datetime, timedelta
 from django.views.decorators.http import require_http_methods
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 
 # Create your views here.
 
@@ -56,14 +58,12 @@ def login_view(request):
         if user is None:
             return JsonResponse({'error': '用户名或密码错误'}, status=400)
         
-        payload = {
-            'user_id': user.id,
-            'username': user.username,
-            'exp': datetime.utcnow() + timedelta(days=7)
-        }
-        token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+        # 使用 SimpleJWT 生成 token
+        refresh = RefreshToken.for_user(user)
+        
         return JsonResponse({
-            'token': token, 
+            'token': str(refresh.access_token),
+            'refresh': str(refresh),
             'user_id': user.id,
             'username': user.username,
             'msg': '登录成功'
@@ -73,29 +73,10 @@ def login_view(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-def jwt_required(view_func):
-    def wrapper(request, *args, **kwargs):
-        auth_header = request.META.get('HTTP_AUTHORIZATION')
-        if not auth_header or not auth_header.startswith('Bearer '):
-            return JsonResponse({'error': '未提供有效的JWT令牌'}, status=401)
-        token = auth_header.split(' ')[1]
-        try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            user = User.objects.get(id=payload['user_id'])
-            request.user = user
-        except Exception as e:
-            return JsonResponse({'error': 'JWT无效或已过期'}, status=401)
-        return view_func(request, *args, **kwargs)
-    return wrapper
-
-@csrf_exempt
-@jwt_required
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_user_profile(request):
     """获取用户个人信息"""
-    if request.method != 'GET':
-        return JsonResponse({'error': '仅支持GET请求'}, status=405)
     try:
         user = request.user
         profile_data = {
@@ -134,12 +115,10 @@ def get_user_profile(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
-@jwt_required
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def update_user_profile(request):
     """更新用户个人信息"""
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
@@ -166,12 +145,10 @@ def update_user_profile(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
-@jwt_required
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_resume(request):
     """获取用户简历详细信息"""
-    if request.method != 'GET':
-        return JsonResponse({'error': '仅支持GET请求'}, status=405)
     try:
         user = request.user
         
@@ -258,7 +235,7 @@ def get_resume(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@permission_classes([IsAuthenticated])
 def create_or_update_resume(request):
     """创建或更新简历"""
     if request.method != 'POST':
@@ -312,7 +289,7 @@ def create_or_update_resume(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@permission_classes([IsAuthenticated])
 def manage_work_experience(request):
     """管理工作经历：创建（不传id）或更新（传id）"""
     if request.method != 'POST':
@@ -348,7 +325,7 @@ def manage_work_experience(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@permission_classes([IsAuthenticated])
 def manage_project_experience(request):
     """管理项目经历：创建（不传id）或更新（传id）"""
     if request.method != 'POST':
@@ -383,7 +360,7 @@ def manage_project_experience(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@permission_classes([IsAuthenticated])
 def manage_education_experience(request):
     """管理教育经历：创建（不传id）或更新（传id）"""
     if request.method != 'POST':
@@ -418,7 +395,7 @@ def manage_education_experience(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@permission_classes([IsAuthenticated])
 def manage_custom_section(request):
     """管理自定义部分：创建（不传id）或更新（传id）"""
     if request.method != 'POST':
@@ -449,7 +426,7 @@ def manage_custom_section(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@permission_classes([IsAuthenticated])
 def delete_work_experience(request):
     """删除工作经历"""
     if request.method != 'DELETE':
@@ -475,7 +452,7 @@ def delete_work_experience(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@permission_classes([IsAuthenticated])
 def delete_project_experience(request):
     """删除项目经历"""
     if request.method != 'DELETE':
@@ -501,7 +478,7 @@ def delete_project_experience(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@permission_classes([IsAuthenticated])
 def delete_education_experience(request):
     """删除教育经历"""
     if request.method != 'DELETE':
@@ -527,7 +504,7 @@ def delete_education_experience(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
-@jwt_required
+@permission_classes([IsAuthenticated])
 def delete_custom_section(request):
     """删除自定义部分"""
     if request.method != 'DELETE':
