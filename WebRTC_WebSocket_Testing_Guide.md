@@ -6,10 +6,44 @@
 
 ---
 
-## 1. WebSocket 连接信息
+## 1. 面试流程
+
+### 1.1 创建面试
+
+在建立 WebSocket 连接前，需要先创建面试：
+
+```http
+POST /interviews/create/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+    "position_name": "后端开发工程师",
+    "position_type": "backend",
+    "company_name": "示例公司",  // 可选
+    "position_description": "负责后端开发工作",
+    "position_requirements": "熟悉Python/Django",  // 可选
+    "interview_time": "2024-03-20T14:30:00Z"  // 可选，默认为当前时间
+}
+```
+
+响应：
+```json
+{
+    "id": "123",  // 面试ID
+    "interview_time": "2024-03-20T14:30:00Z",
+    "position_name": "后端开发工程师",
+    "company_name": "示例公司",
+    "position_type": "backend",
+    "msg": "面试创建成功"
+}
+```
+
+### 1.2 WebSocket 连接信息
 
 - **地址**：`ws://<服务器地址>:8000/ws/webrtc/`
   - 本地开发示例：`ws://localhost:8000/ws/webrtc/`
+- **认证**：URL参数传递token，例如：`ws://localhost:8000/ws/webrtc/?token=<your_token>`
 - **协议**：WebSocket，消息体为 JSON
 
 ---
@@ -24,7 +58,8 @@
 {
   "type": "create_stream",
   "title": "面试视频流",
-  "description": "实时面试"
+  "description": "实时面试",
+  "interview_id": "123"  // 必填，从创建面试接口获得的ID
 }
 ```
 
@@ -64,11 +99,7 @@ canvas.toBlob(blob => {
 }, 'image/jpeg', 0.8);
 ```
 
-#### 4. WebRTC 信令/视频帧（如需）
-
-- `offer`、`answer`、`ice_candidate`、`video_frame` 等，详见下方“信令消息”小节。
-
-#### 5. 主动断开
+#### 4. 主动断开
 
 ```json
 {
@@ -80,7 +111,29 @@ canvas.toBlob(blob => {
 
 ### 2.2 后端发送消息
 
-#### 1. 面试流程控制消息
+#### 1. 连接建立确认
+
+```json
+{
+  "type": "connection_established",
+  "session_id": "<会话ID>",
+  "text": "WebRTC连接已建立"
+}
+```
+
+#### 2. 流创建成功
+
+```json
+{
+  "type": "stream_created",
+  "stream_id": "<流ID>",
+  "title": "测试流",
+  "interview_id": "123",
+  "text": "视频流创建成功"
+}
+```
+
+#### 3. 面试流程控制消息
 
 ```json
 {
@@ -93,7 +146,7 @@ canvas.toBlob(blob => {
 - `phase`：当前面试阶段。`intro`=自我介绍，`question`=问答，`code`=代码题。
 - `text`：面试官提示语或问题内容。前端应根据此内容切换UI、自动开启/关闭语音识别等。
 
-#### 2. 语音转写结果
+#### 4. 语音转写结果
 
 ```json
 {
@@ -104,43 +157,7 @@ canvas.toBlob(blob => {
 
 - `text` 字段为后端实时识别到的中文文本，前端可实时显示。
 
-#### 3. 视频流帧广播
-
-```json
-{
-  "type": "video_frame",
-  "frame_data": "<base64编码的JPEG图片>",
-  "frame_type": "keyframe",
-  "peer_id": "<发送者id>"
-}
-```
-
-- 后端可将某用户推送的视频帧广播给其他观看者。
-
-#### 4. 连接建立确认
-
-```json
-{
-  "type": "connection_established",
-  "session_id": "<会话ID>",
-  "text": "WebRTC连接已建立"
-}
-```
-
-#### 5. 错误/提示
-
-```json
-{
-  "type": "error",
-  "text": "<错误描述>"
-}
-```
-
-#### 6. WebRTC 信令/视频帧
-
-- `offer`、`answer`、`ice_candidate`、`video_frame`、`stream_created` 等，结构与前端发送类似。
-
-#### 7. 作弊检测信号
+#### 5. 作弊检测信号
 
 ```json
 {
@@ -151,56 +168,62 @@ canvas.toBlob(blob => {
 
 - 前端收到此消息后应高亮提示用户或自动上报。
 
+#### 6. 错误/提示
+
+```json
+{
+  "type": "error",
+  "text": "<错误描述>"
+}
+```
+
 ---
 
 ## 3. 典型消息流程
 
-1. 前端连接 ws，收到 `connection_established`。
-2. 收到 `interview_message`（phase: intro, text: “请开始自我介绍吧”），前端自动开启语音识别。
-3. 用户自我介绍，前端持续推送 `audio_frame`，后端持续推送 `asr_result`。
-4. 15秒无语音或识别到“说完了”，后端推送 `interview_message`（phase: question, text: “自我介绍结束，下面开始问问题。”），紧接着推送第一个问题。
-5. 问题阶段循环，直到问题队列为空，后端推送 `interview_message`（phase: code, text: “问答环节结束，下面进入代码题环节。”）。
-6. 代码题阶段（后端可继续推送相关消息，暂未实现）。
+1. 前端调用 `/interviews/create/` 创建面试，获取面试ID。
+2. 前端连接 WebSocket，收到 `connection_established`。
+3. 前端发送 `create_stream` 消息（带上面试ID），收到 `stream_created` 响应。
+4. 收到 `interview_message`（phase: intro, text: "请开始自我介绍吧"），前端自动开启语音识别。
+5. 用户自我介绍，前端持续推送 `audio_frame` 和 `video_frame`，后端持续推送 `asr_result`。
+6. 15秒无语音或识别到"说完了"，后端推送 `interview_message`（phase: question, text: "自我介绍结束，下面开始问问题。"），紧接着推送第一个问题。
+7. 问题阶段循环，直到问题队列为空，后端推送 `interview_message`（phase: code, text: "问答环节结束，下面进入代码题环节。"）。
+8. 代码题阶段（后端可继续推送相关消息，暂未实现）。
 
 ---
 
-## 4. 信令与视频帧消息（WebRTC相关）
+## 4. 前端对接建议
 
-- `offer`、`answer`、`ice_candidate`、`video_frame` 消息结构：
-
-```json
-{
-  "type": "offer" | "answer" | "ice_candidate" | "video_frame",
-  // 具体字段见webrtc/consumers.py
-}
-```
-
-- 这些消息用于WebRTC信令交换和视频帧转发，通常由前端WebRTC SDK自动处理。
-
----
-
-## 5. 前端对接建议
-
-1. **连接建立后**，监听 `interview_message`，根据 `phase` 字段切换UI和控制语音识别：
-   - `intro` 阶段：收到“请开始自我介绍吧”后自动开启语音识别，用户说完或15秒无语音自动进入下阶段。
-   - `question` 阶段：每收到一个问题自动开启语音识别，用户说完或15秒无语音自动进入下一个问题。
-   - `code` 阶段：收到“问答环节结束，下面进入代码题环节。”后可切换到代码题UI。
-2. **实时显示转写内容**：监听 `asr_result`，将 `text` 实时显示在页面上。
-3. **推送音频帧**：采集音频后每40ms推送一帧，停止时发送 `end: true`。
-4. **推送视频帧**：建议每1秒推送一帧，frame_data为base64编码JPEG，frame_type为keyframe。
-5. **信令与视频帧**：WebRTC信令和视频帧消息需与前端WebRTC SDK配合。
+1. **创建面试**：
+   - 调用 `/interviews/create/` 接口创建面试
+   - 保存返回的面试ID，后续WebSocket连接需要用到
+2. **WebSocket连接**：
+   - 连接时在URL中带上token参数
+   - 连接成功后发送 `create_stream` 消息，必须带上面试ID
+3. **面试流程**：
+   - 监听 `interview_message`，根据 `phase` 字段切换UI和控制语音识别
+   - 实时显示 `asr_result` 中的转写内容
+   - 每40ms推送一帧音频，每1秒推送一帧视频
+4. **错误处理**：
+   - 监听 `error` 和 `cheat_detected` 消息
+   - 实现断线重连机制
 
 ---
 
-## 6. 注意事项
+## 5. 注意事项
 
 1. 确保浏览器支持WebRTC和WebSocket。
 2. 需要用户授权摄像头和麦克风权限。
 3. 音频帧务必为16kHz单声道16位小端PCM，帧长1280字节，base64编码。
 4. 视频帧建议为480x360或640x480 JPEG，base64编码。
-5. 建议实现断线重连机制。
-6. 生产环境使用HTTPS和WSS协议。
-7. 问题队列、面试阶段等由后端自动控制，前端只需根据ws消息切换UI和控制语音识别。
+5. 生产环境使用HTTPS和WSS协议。
+6. 问题队列、面试阶段等由后端自动控制，前端只需根据ws消息切换UI和控制语音识别。
+7. 创建面试时的position_type必须是以下之一：
+   - backend：后端开发
+   - frontend：前端开发
+   - pm：产品经理
+   - qa：测试
+   - algo：算法
 
 ---
 
