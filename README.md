@@ -56,7 +56,11 @@ python manage.py migrate
 
 > **注意：如需使用WebSocket（如WebRTC），必须用ASGI服务器启动，不能用`runserver`！**
 
-开发环境推荐（requirement里已包含该包）：
+
+
+- 启动redis
+- 启动异步处理队列：celery -A config worker -l info --pool=solo
+- 开发环境推荐（requirement里已包含该包）：
 
 ```bash
 python -m uvicorn config.asgi:application --host 0.0.0.0 --port 8000
