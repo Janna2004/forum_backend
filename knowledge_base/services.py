@@ -201,42 +201,69 @@ class KnowledgeBaseService:
     def __init__(self):
         self.spark_service = XunfeiSparkService()
     
-    def search_relevant_questions(self, job_position: JobPosition, resume: Resume, limit: int = 5) -> List[Dict[str, Any]]:
-        """从知识库中检索相关问题"""
-        
-        # 从知识库中检索相关问题
-        knowledge_questions = self._search_knowledge_base(job_position, resume, limit)
-        
-        # 使用星火API生成个性化问题
-        generated_questions = self.spark_service.generate_interview_questions(job_position, resume)
-        
-        # 合并结果
-        all_questions = []
-        
-        # 添加知识库问题
-        for q in knowledge_questions:
-            all_questions.append({
-                'question': q.question,
-                'source': 'knowledge_base',
-                'category': q.category,
-                'difficulty': q.difficulty_level,
-                'tags': q.tags
-            })
-        
-        # 添加生成的问题
-        for q in generated_questions:
-            all_questions.append({
-                'question': q,
-                'source': 'generated',
-                'category': 'custom',
-                'difficulty': 3,
-                'tags': []
-            })
-        
-        # 记录生成历史
-        self._save_interview_questions(job_position, resume, all_questions)
-        
-        return all_questions[:limit]
+    def search_relevant_questions(self, position_type, resume, limit=5):
+        """
+        根据岗位和简历信息搜索相关面试问题
+        """
+        try:
+            # 如果没有简历，返回默认问题
+            if not resume:
+                return [
+                    '请简单自我介绍一下。',
+                    '你为什么选择我们公司？',
+                    '请介绍一下你最近的一个项目。',
+                    '你遇到过最大的技术难题是什么？',
+                    '你对未来的职业规划是什么？'
+                ]
+            
+            # 根据岗位类型获取相关问题
+            questions = []
+            if position_type == 'backend':
+                questions.extend([
+                    '请介绍一下你使用过的后端框架和技术栈。',
+                    '你是如何处理高并发场景的？',
+                    '请介绍一下你设计过的数据库结构。'
+                ])
+            elif position_type == 'frontend':
+                questions.extend([
+                    '请介绍一下你熟悉的前端框架。',
+                    '你是如何优化前端性能的？',
+                    '请介绍一下你做过的响应式设计。'
+                ])
+            elif position_type == 'algo':
+                questions.extend([
+                    '请介绍一下你最熟悉的算法。',
+                    '你是如何处理大规模数据的？',
+                    '请介绍一下你在机器学习方面的经验。'
+                ])
+            
+            # 添加基于简历的个性化问题
+            if hasattr(resume, 'work_experiences'):
+                for exp in resume.work_experiences.all()[:2]:
+                    questions.append(f'请详细介绍一下你在{exp.company_name}的工作经历。')
+            
+            if hasattr(resume, 'project_experiences'):
+                for proj in resume.project_experiences.all()[:2]:
+                    questions.append(f'请介绍一下{proj.project_name}项目的具体情况。')
+            
+            # 确保问题数量不超过限制
+            questions = questions[:limit]
+            
+            # 如果问题不够，补充通用问题
+            while len(questions) < limit:
+                questions.append('你对未来的职业规划是什么？')
+            
+            return questions
+            
+        except Exception as e:
+            print(f"搜索相关问题出错: {e}")
+            return [
+                '请简单自我介绍一下。',
+                '你为什么选择我们公司？',
+                '请介绍一下你最近的一个项目。',
+                '你遇到过最大的技术难题是什么？',
+                '你对未来的职业规划是什么？'
+            ]
     
     def _search_knowledge_base(self, job_position: JobPosition, resume: Resume, limit: int) -> List[KnowledgeBaseEntry]:
         """从知识库中检索相关问题，优先匹配岗位类型和公司名称"""

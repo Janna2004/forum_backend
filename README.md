@@ -22,6 +22,12 @@ cd forum_backend
 
 ### 2. 安装依赖
 
+安装redis
+
+https://github.com/MicrosoftArchive/redis/releases
+
+安装requirement
+
 ```bash
 pip install -r requirements.txt
 ```

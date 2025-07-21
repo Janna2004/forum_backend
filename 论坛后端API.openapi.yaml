@@ -1,4 +1,4 @@
-openapi: 3.0.1
+openapi: 3.0.0
 info:
   title: 论坛后端API
   description: 论坛后端系统的WebRTC视频流WebSocket接口，用于实现实时视频通信功能
@@ -2341,6 +2341,168 @@ paths:
           description: 权限不足
           headers: {}
       security: []
+  /interviews/coding-problems/:
+    get:
+      tags:
+        - interviews
+      summary: 获取代码题列表（分页）
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: 页码（从1开始）
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          description: 每页数量（默认10，最大100）
+          schema:
+            type: integer
+            default: 10
+        - name: difficulty
+          in: query
+          description: 难度筛选
+          schema:
+            type: string
+            enum: [easy, medium, hard]
+        - name: position_type
+          in: query
+          description: 岗位类型筛选
+          schema:
+            type: string
+            enum: [backend, frontend, algo, pm, qa]
+        - name: tag
+          in: query
+          description: 标签筛选
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    description: 总记录数
+                  next:
+                    type: string
+                    nullable: true
+                    description: 下一页URL
+                  previous:
+                    type: string
+                    nullable: true
+                    description: 上一页URL
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        number:
+                          type: string
+                          description: 题目序号（如LC001）
+                        title:
+                          type: string
+                        difficulty:
+                          type: string
+                          enum: [easy, medium, hard]
+                        tags:
+                          type: array
+                          items:
+                            type: string
+                        companies:
+                          type: array
+                          items:
+                            type: string
+                        position_types:
+                          type: array
+                          items:
+                            type: string
+                        created_at:
+                          type: string
+                          format: date-time
+                        updated_at:
+                          type: string
+                          format: date-time
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+  
+  /interviews/coding-problems/{problem_id}/:
+    get:
+      tags:
+        - interviews
+      summary: 获取代码题详细信息
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: problem_id
+          in: path
+          required: true
+          description: 代码题ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  number:
+                    type: string
+                    description: 题目序号（如LC001）
+                  title:
+                    type: string
+                  description:
+                    type: string
+                  difficulty:
+                    type: string
+                    enum: [easy, medium, hard]
+                  tags:
+                    type: array
+                    items:
+                      type: string
+                  companies:
+                    type: array
+                    items:
+                      type: string
+                  position_types:
+                    type: array
+                    items:
+                      type: string
+                  examples:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        input_data:
+                          type: string
+                        output_data:
+                          type: string
+                        explanation:
+                          type: string
+                        order:
+                          type: integer
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: 代码题不存在
+
 components:
   schemas: {}
   securitySchemes:
