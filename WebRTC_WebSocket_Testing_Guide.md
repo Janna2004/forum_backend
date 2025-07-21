@@ -213,7 +213,72 @@ canvas.toBlob(blob => {
 
 ---
 
-## 3. 典型消息流程
+### 2.5 代码题环节相关消息（新增）
+
+#### 1. 后端推送代码题
+
+```json
+{
+  "type": "coding_problem",
+  "phase": "code",
+  "problem": {
+    "id": 1,
+    "number": "LC001",
+    "title": "两数之和",
+    "description": "给定一个整数数组...",
+    "difficulty": "easy",
+    "tags": ["数组", "哈希表"],
+    "example": {
+      "input": "nums = [2,7,11,15], target = 9",
+      "output": "[0,1]",
+      "explanation": "因为 nums[0] + nums[1] == 9 ，返回 [0, 1] 。"
+    }
+  }
+}
+```
+- `phase` 固定为 `code`。
+- `problem` 字段为当前代码题，包含题号、标题、描述、难度、标签、首个样例。
+
+#### 2. 前端提交代码答案
+
+```json
+{
+  "type": "submit_coding_answer",
+  "code": "def twoSum(nums, target): ...",  // 用户代码
+  "language": "python"  // 语言，可选：python/java/cpp/javascript
+}
+```
+
+#### 3. 后端返回代码提交确认
+
+```json
+{
+  "type": "coding_answer_submitted",
+  "text": "代码已提交成功"
+}
+```
+
+#### 4. 前端请求下一道代码题
+
+```json
+{
+  "type": "request_next_coding_problem"
+}
+```
+
+- 后端会推送下一道 `coding_problem`，若无更多题目则推送：
+
+```json
+{
+  "type": "interview_message",
+  "phase": "code",
+  "text": "代码题环节结束。面试完毕！"
+}
+```
+
+---
+
+## 3. 典型消息流程（含代码题）
 
 1. 前端调用 `/users/resume/list/` 获取用户简历列表，让用户选择使用的简历。
 2. 前端调用 `/interviews/create/` 创建面试，获取面试ID。
@@ -223,7 +288,22 @@ canvas.toBlob(blob => {
 6. 用户自我介绍，前端持续推送 `audio_frame` 和 `video_frame`，后端持续推送 `asr_result`。
 7. 15秒无语音或识别到"说完了"，后端推送 `interview_message`（phase: question, text: "自我介绍结束，下面开始问问题。"），紧接着推送第一个问题。
 8. 问题阶段循环，直到问题队列为空，后端推送 `interview_message`（phase: code, text: "问答环节结束，下面进入代码题环节。"）。
-9. 代码题阶段（后端可继续推送相关消息，暂未实现）。
+9. **代码题阶段**：
+    - 后端推送 `coding_problem`，前端显示题目、样例、代码编辑区。
+    - 前端填写代码，点击提交，发送 `submit_coding_answer`。
+    - 后端返回 `coding_answer_submitted`。
+    - 前端可点击“下一题”发送 `request_next_coding_problem`，后端继续推送下一道 `coding_problem`。
+    - 题目做完后，后端推送 `interview_message`（phase: code, text: "代码题环节结束。面试完毕！"）。
+
+---
+
+## 4. 前端对接建议（补充）
+
+- 监听 `coding_problem` 消息，弹出代码题UI，显示题目、描述、样例。
+- 用户填写代码后，点击“提交代码”按钮，发送 `submit_coding_answer`。
+- 收到 `coding_answer_submitted` 后可提示“提交成功”，并允许用户点击“下一题”按钮。
+- 点击“下一题”发送 `request_next_coding_problem`，收到新题后刷新UI。
+- 若收到 `interview_message` 且 phase 为 `code` 且 text 包含“结束”，则隐藏代码题UI，显示面试结束提示。
 
 ---
 
@@ -248,21 +328,13 @@ canvas.toBlob(blob => {
 
 ---
 
-## 5. 注意事项
+## 5. 注意事项（补充）
 
-1. 确保浏览器支持WebRTC和WebSocket。
-2. 需要用户授权摄像头和麦克风权限。
-3. 音频帧务必为16kHz单声道16位小端PCM，帧长1280字节，base64编码。
-4. 视频帧建议为480x360或640x480 JPEG，base64编码。
-5. 生产环境使用HTTPS和WSS协议。
-6. 问题队列、面试阶段等由后端自动控制，前端只需根据ws消息切换UI和控制语音识别。
-7. **多简历支持**：用户可以创建多份简历，面试时必须选择使用的简历ID传递给后端，后端会根据选择的简历生成个性化面试问题。
-8. 创建面试时的position_type必须是以下之一：
-   - backend：后端开发
-   - frontend：前端开发
-   - pm：产品经理
-   - qa：测试
-   - algo：算法
+- 代码题数量通常为1-3道，由后端根据岗位和简历智能分配。
+- 每道题只推送首个样例，前端可显示“样例输入/输出/解释”。
+- 支持多语言（python/java/cpp/javascript），前端可提供下拉选择。
+- 代码答案和题目顺序会被后端记录。
+- 代码题环节期间，`audio_frame`/`video_frame`消息可继续推送（如需同步音视频）。
 
 ---
 
