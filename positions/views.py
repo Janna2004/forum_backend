@@ -26,8 +26,8 @@ class PositionViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PositionSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['position_name', 'company_name']
-    ordering_fields = ['created_at', 'updated_at']
-    ordering = ['-created_at']
+    ordering_fields = ['id', 'position_name', 'company_name']
+    ordering = ['-id']  # 默认按id倒序排序
 
     @action(detail=False, methods=['get'])
     def search(self, request):

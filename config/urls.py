@@ -9,10 +9,10 @@ from django.urls import path, include
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path('', include('users.urls')),
-    path('', include('posts.urls')),
-    path('', include('webrtc.urls')),
-    path('', include('knowledge_base.urls')),
-    path('', include('interviews.urls')),
-    path('', include('positions.urls')),  # 添加positions的URL配置
+    path('users/', include('users.urls')),
+    path('posts/', include('posts.urls')),
+    path('webrtc/', include('webrtc.urls')),
+    path('knowledge-base/', include('knowledge_base.urls')),
+    path('interviews/', include('interviews.urls')),
+    path('positions/', include('positions.urls')),  # 添加positions的URL配置
 ]

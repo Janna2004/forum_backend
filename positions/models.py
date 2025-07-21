@@ -7,8 +7,6 @@ class Position(models.Model):
     position_name = models.CharField(max_length=255, verbose_name='职位名称')
     company_name = models.CharField(max_length=255, verbose_name='公司名称')
     position_url = models.TextField(verbose_name='职位链接')
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
         db_table = 'nowcoder_data'  # 使用已有的表名
