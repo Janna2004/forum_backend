@@ -181,12 +181,18 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             title = data.get('title', '未命名流')
             description = data.get('description', '')
             self.interview_id = data.get('interview_id')  # 获取面试ID
-            self.resume_id = data.get('resume_id')       # 获取简历ID
             
             if not self.interview_id:
                 raise ValueError("缺少面试ID")
-            if not self.resume_id:
-                raise ValueError("缺少简历ID")
+            
+            # 通过面试ID获取简历ID
+            interview = await self.get_interview_by_id(self.interview_id)
+            if not interview:
+                raise ValueError("面试记录不存在")
+            if not interview.resume:
+                raise ValueError("该面试没有关联简历")
+            
+            self.resume_id = interview.resume.id
             
             print("[调试] handle_create_stream - interview_id:", self.interview_id, "resume_id:", self.resume_id)
             
@@ -553,7 +559,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         """根据面试ID获取面试信息"""
         try:
             from interviews.models import Interview
-            return Interview.objects.select_related('job_position').get(id=interview_id, user=self.user)
+            return Interview.objects.select_related('job_position', 'resume').get(id=interview_id, user=self.user)
         except Interview.DoesNotExist:
             return None
     

@@ -10,6 +10,9 @@ from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
 from .models import CodingProblem, CodingExample
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Create your views here.
 
@@ -20,17 +23,42 @@ class InterviewCreateView(generics.CreateAPIView):
     permission_classes = [IsAuthenticated]
 
     def create(self, request, *args, **kwargs):
+        # 添加调试日志
+        logger.info(f"创建面试请求 - 用户: {request.user.id}")
+        logger.info(f"请求数据: {request.data}")
+        
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        interview = serializer.save()
-        return Response({
-            'id': interview.id,
-            'interview_time': interview.interview_time,
-            'position_name': interview.position_name,
-            'company_name': interview.company_name,
-            'position_type': interview.position_type,
-            'msg': '面试创建成功'
-        }, status=status.HTTP_201_CREATED)
+        
+        if not serializer.is_valid():
+            # 详细记录验证错误
+            logger.error(f"面试创建验证失败 - 用户: {request.user.id}")
+            logger.error(f"验证错误详情: {serializer.errors}")
+            logger.error(f"请求数据: {request.data}")
+            
+            return Response({
+                'errors': serializer.errors,
+                'msg': '数据验证失败'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            interview = serializer.save()
+            logger.info(f"面试创建成功 - ID: {interview.id}, 用户: {request.user.id}")
+            
+            return Response({
+                'id': interview.id,
+                'interview_time': interview.interview_time,
+                'position_name': interview.position_name,
+                'company_name': interview.company_name,
+                'position_type': interview.position_type,
+                'msg': '面试创建成功'
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logger.error(f"面试创建异常 - 用户: {request.user.id}, 错误: {str(e)}")
+            return Response({
+                'error': f'创建面试时出错: {str(e)}',
+                'msg': '服务器内部错误'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class InterviewListView(generics.ListAPIView):

@@ -1,9 +1,11 @@
 from rest_framework import serializers
 from .models import Interview
 from knowledge_base.models import JobPosition
+from users.models import Resume
 
 class InterviewCreateSerializer(serializers.ModelSerializer):
     job_position_id = serializers.IntegerField(required=False, allow_null=True)
+    resume_id = serializers.IntegerField(required=True)  # 添加必需的简历ID字段
     interview_time = serializers.DateTimeField(required=False)
 
     class Meta:
@@ -11,6 +13,7 @@ class InterviewCreateSerializer(serializers.ModelSerializer):
         fields = [
             'id',  # 添加id字段
             'job_position_id',
+            'resume_id',  # 添加resume_id字段
             'interview_time',
             'position_name',
             'company_name',
@@ -28,9 +31,23 @@ class InterviewCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("指定的岗位不存在")
         return value
 
+    def validate_resume_id(self, value):
+        """验证简历ID"""
+        user = self.context['request'].user
+        try:
+            resume = Resume.objects.get(id=value, user=user)
+            return value
+        except Resume.DoesNotExist:
+            raise serializers.ValidationError("指定的简历不存在或不属于当前用户")
+
     def create(self, validated_data):
         user = self.context['request'].user
         job_position_id = validated_data.pop('job_position_id', None)
+        resume_id = validated_data.pop('resume_id')
+        
+        # 获取简历对象
+        resume = Resume.objects.get(id=resume_id, user=user)
+        validated_data['resume'] = resume
         
         # 如果提供了job_position_id，从数据库获取相关信息
         if job_position_id:

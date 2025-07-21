@@ -7,7 +7,17 @@ class Interview(models.Model):
     """面试模型"""
     POSITION_TYPE_CHOICES = JobPosition.POSITION_TYPE_CHOICES
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='用户')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='interviews', verbose_name='用户')
+    
+    # 简历关联
+    resume = models.ForeignKey(
+        'users.Resume', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='interviews',
+        verbose_name='关联简历'
+    )
     
     # 面试时间相关
     interview_time = models.DateTimeField(verbose_name='面试时间')

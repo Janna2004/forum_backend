@@ -237,7 +237,7 @@
 
         // 选择简历
         function selectResume(resume, clickedItem) {
-            selectedResumeId = resume.resume_id;
+            selectedResumeId = resume.resume_id;  // 使用resume_id字段
             selectedResumeSpan.textContent = `${resume.resume_name} (${resume.expected_position})`;
             
             // 高亮选中的简历
@@ -250,6 +250,13 @@
             
             // 启用创建面试按钮
             createInterviewBtn.disabled = false;
+            
+            // 添加调试日志
+            console.log('选择简历:', {
+                resume_id: selectedResumeId,
+                resume_name: resume.resume_name,
+                expected_position: resume.expected_position
+            });
         }
 
         // 加载简历列表按钮事件
@@ -265,6 +272,16 @@
             const token = await loginAndGetToken();
             if (!token) return;
 
+            // 添加调试日志
+            console.log('创建面试请求数据:', {
+                resume_id: selectedResumeId,
+                position_name: '测试岗位',
+                position_type: 'backend',
+                position_description: '这是一个测试面试',
+                company_name: '测试公司',
+                interview_time: new Date().toISOString()
+            });
+
             try {
                 const resp = await fetch('/interviews/create/', {
                     method: 'POST',
@@ -273,21 +290,24 @@
                         'Authorization': `Bearer ${token}`
                     },
                     body: JSON.stringify({
+                        resume_id: selectedResumeId,  // 确保这里使用正确的resume_id
                         position_name: '测试岗位',
                         position_type: 'backend',
                         position_description: '这是一个测试面试',
                         company_name: '测试公司',
-                        interview_time: new Date().toISOString()  // 添加面试时间
+                        interview_time: new Date().toISOString()
                     })
                 });
 
                 if (!resp.ok) {
-                    alert('创建面试失败');
+                    const errorData = await resp.json();
+                    console.error('创建面试失败:', errorData);  // 添加错误日志
+                    alert('创建面试失败: ' + JSON.stringify(errorData));
                     return;
                 }
 
                 const data = await resp.json();
-                console.log('创建面试响应:', data);  // 添加调试日志
+                console.log('创建面试响应:', data);
                 currentInterviewId = data.id;
                 if (!currentInterviewId) {
                     alert('创建面试失败：未获取到面试ID');
@@ -297,7 +317,8 @@
                 startBtn.disabled = false;
                 createInterviewBtn.disabled = true;
             } catch (e) {
-                alert('创建面试请求异常');
+                console.error('创建面试异常:', e);  // 添加异常日志
+                alert('创建面试请求异常: ' + e.message);
             }
         };
 
