@@ -3,11 +3,11 @@
 ---
 
 > 本项目部分爬虫与数据处理代码参考自 [chadqiu/newcoder-crawler](https://github.com/chadqiu/newcoder-crawler?tab=Apache-2.0-1-ov-file)。
-> 
+>
 > 该项目遵循 [Apache-2.0 license](https://github.com/chadqiu/newcoder-crawler/blob/main/LICENSE)。
-> 
+>
 > 原作者：chadqiu（详见其 [GitHub 主页](https://github.com/chadqiu) 及 [项目主页](https://github.com/chadqiu/newcoder-crawler)）。
-> 
+>
 > 本集成系统在遵循 Apache-2.0 协议的前提下进行了二次开发与集成。
 
 ---
@@ -80,14 +80,7 @@ cd crawler/interview_experience
 python crawler_integrated.py
 ```
 
-### 方式二：测试集成功能
-
-```bash
-cd crawler/interview_experience  
-python test_integration.py
-```
-
-## 功能说明
+### 功能说明
 
 ### 数据获取
 
