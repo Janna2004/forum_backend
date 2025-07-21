@@ -62,6 +62,8 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         self.current_question_idx = 0 # 新增：记录当前问题的序号
         self.audio_buffer = []
         self.video_frame_buffer = []
+        self.coding_problems = []  # 代码题列表
+        self.current_coding_problem = None  # 当前代码题
     
     async def connect(self):
         print("[WebRTCConsumer] connect called")
@@ -146,6 +148,10 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 await self.handle_audio_frame(data)
             elif message_type == 'request_next_question':
                 await self.handle_request_next_question()
+            elif message_type == 'request_next_coding_problem':
+                await self.handle_request_next_coding_problem()
+            elif message_type == 'submit_coding_answer':
+                await self.handle_submit_coding_answer(data)
             elif message_type == 'disconnect':
                 await self.handle_disconnect(data)
             else:
@@ -622,7 +628,8 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 'phase': self.PHASE_CODE,
                 'text': '问答环节结束，下面进入代码题环节。'
             }))
-            # 代码题阶段暂不处理
+            # 开始代码题阶段
+            await self.start_coding_problems()
 
     async def save_current_answer(self):
         print("[调试] save_current_answer called, current_question:", self.current_question)
@@ -852,4 +859,137 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             'frame_data': event['frame_data'],
             'frame_type': event['frame_type'],
             'peer_id': event['peer_id']
-        })) 
+        }))
+    
+    async def start_coding_problems(self):
+        """开始代码题环节"""
+        try:
+            # 获取面试和简历信息
+            interview = await self.get_interview_by_id(self.interview_id)
+            resume = await self.get_resume_by_id(self.resume_id)
+            
+            if not interview or not resume:
+                await self.send(text_data=json.dumps({
+                    'type': 'error',
+                    'text': '无法获取面试或简历信息'
+                }))
+                return
+            
+            # 使用代码题选择服务选择合适的题目
+            from interviews.services import CodingProblemService
+            coding_service = CodingProblemService()
+            self.coding_problems = await database_sync_to_async(
+                coding_service.select_problems_for_interview
+            )(interview, resume, limit=3)
+            
+            if not self.coding_problems:
+                await self.send(text_data=json.dumps({
+                    'type': 'interview_message',
+                    'phase': self.PHASE_CODE,
+                    'text': '抱歉，没有找到合适的代码题。面试结束。'
+                }))
+                return
+            
+            # 开始第一道代码题
+            await self.start_next_coding_problem()
+            
+        except Exception as e:
+            print(f"[DEBUG] start_coding_problems error: {e}")
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'text': f'代码题加载失败: {str(e)}'
+            }))
+    
+    async def start_next_coding_problem(self):
+        """开始下一道代码题"""
+        if not self.coding_problems:
+            await self.send(text_data=json.dumps({
+                'type': 'interview_message',
+                'phase': self.PHASE_CODE,
+                'text': '代码题环节结束。面试完毕！'
+            }))
+            return
+        
+        # 取出下一道题
+        self.current_coding_problem = self.coding_problems.pop(0)
+        
+        # 获取第一个样例
+        first_example = await database_sync_to_async(
+            lambda: self.current_coding_problem.examples.first()
+        )()
+        
+        # 构造代码题信息
+        problem_data = {
+            'type': 'coding_problem',
+            'phase': self.PHASE_CODE,
+            'problem': {
+                'id': self.current_coding_problem.id,
+                'number': self.current_coding_problem.number,
+                'title': self.current_coding_problem.title,
+                'description': self.current_coding_problem.description,
+                'difficulty': self.current_coding_problem.difficulty,
+                'tags': self.current_coding_problem.tags,
+                'example': {
+                    'input': first_example.input_data if first_example else '',
+                    'output': first_example.output_data if first_example else '',
+                    'explanation': first_example.explanation if first_example else ''
+                } if first_example else None
+            }
+        }
+        
+        await self.send(text_data=json.dumps(problem_data))
+    
+    async def handle_request_next_coding_problem(self):
+        """处理请求下一道代码题"""
+        if self.phase != self.PHASE_CODE:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'text': '当前不在代码题阶段'
+            }))
+            return
+        
+        await self.start_next_coding_problem()
+    
+    async def handle_submit_coding_answer(self, data):
+        """处理代码题答案提交"""
+        if self.phase != self.PHASE_CODE:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'text': '当前不在代码题阶段'
+            }))
+            return
+        
+        if not self.current_coding_problem:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'text': '没有当前代码题'
+            }))
+            return
+        
+        try:
+            user_code = data.get('code', '')
+            language = data.get('language', 'python')
+            
+            # 保存代码答案到数据库
+            from interviews.models import Interview, InterviewCodingAnswer
+            interview = await self.get_interview_by_id(self.interview_id)
+            
+            await database_sync_to_async(InterviewCodingAnswer.objects.create)(
+                interview=interview,
+                user=self.user,
+                problem=self.current_coding_problem,
+                code_answer=user_code,
+                language=language
+            )
+            
+            await self.send(text_data=json.dumps({
+                'type': 'coding_answer_submitted',
+                'text': '代码已提交成功'
+            }))
+            
+        except Exception as e:
+            print(f"[DEBUG] handle_submit_coding_answer error: {e}")
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'text': f'提交代码失败: {str(e)}'
+            }))

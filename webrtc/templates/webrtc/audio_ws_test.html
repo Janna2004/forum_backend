@@ -85,8 +85,46 @@
     </div>
     
     <video id="video" autoplay playsinline></video>
-    <div id="current-question" style="margin-top:20px;font-weight:bold;color:#1976d2;">当前问题：无</div>
-    <div id="transcript">转写内容将实时显示在这里...</div>
+    <!-- 当前问题显示 -->
+    <div id="currentQuestion">当前问题：等待开始</div>
+    
+    <!-- 新增：代码题显示区域 -->
+    <div id="codingProblemSection" style="display: none;">
+        <h3>代码题</h3>
+        <div id="problemInfo">
+            <div><strong>题目：</strong><span id="problemTitle"></span></div>
+            <div><strong>难度：</strong><span id="problemDifficulty"></span></div>
+            <div><strong>描述：</strong></div>
+            <div id="problemDescription" style="background: #f5f5f5; padding: 10px; margin: 5px 0; white-space: pre-wrap;"></div>
+            <div><strong>样例：</strong></div>
+            <div id="problemExample" style="background: #f0f8ff; padding: 10px; margin: 5px 0; white-space: pre-wrap;"></div>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <label for="codeInput">您的代码：</label><br>
+            <textarea id="codeInput" style="width: 100%; height: 200px; font-family: monospace;" placeholder="请在此输入您的代码解答..."></textarea>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <label for="languageSelect">编程语言：</label>
+            <select id="languageSelect">
+                <option value="python">Python</option>
+                <option value="java">Java</option>
+                <option value="cpp">C++</option>
+                <option value="javascript">JavaScript</option>
+            </select>
+        </div>
+        
+        <div style="margin: 10px 0;">
+            <button id="submitCodeBtn" onclick="submitCode()">提交代码</button>
+            <button id="nextProblemBtn" onclick="requestNextProblem()" style="margin-left: 10px;">下一题</button>
+        </div>
+    </div>
+
+    <!-- 转写结果显示 -->
+    <div>
+        转写结果：<span id="transcript">[无转写内容]</span>
+    </div>
     
     <button id="createInterviewBtn" disabled>第二步：创建面试</button>
     <button id="startBtn" disabled>第三步：开始采集</button>
@@ -105,17 +143,24 @@
         let currentInterviewId = null;
         let selectedResumeId = null;
 
-        const video = document.getElementById('video');
+        // 获取DOM元素
         const transcriptDiv = document.getElementById('transcript');
-        const createInterviewBtn = document.getElementById('createInterviewBtn');
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
+        const questionDiv = document.getElementById('currentQuestion');
         const finishBtn = document.getElementById('finishBtn');
-        const questionDiv = document.getElementById('current-question');
-        const interviewIdSpan = document.getElementById('interviewId');
+        const createInterviewBtn = document.getElementById('createInterviewBtn');
         const loadResumesBtn = document.getElementById('loadResumesBtn');
         const resumeListDiv = document.getElementById('resumeList');
         const selectedResumeSpan = document.getElementById('selectedResume');
+        const interviewIdSpan = document.getElementById('interviewId');
+        
+        // 新增：代码题相关元素
+        const codingProblemSection = document.getElementById('codingProblemSection');
+        const problemTitle = document.getElementById('problemTitle');
+        const problemDifficulty = document.getElementById('problemDifficulty');
+        const problemDescription = document.getElementById('problemDescription');
+        const problemExample = document.getElementById('problemExample');
+        const codeInput = document.getElementById('codeInput');
+        const languageSelect = document.getElementById('languageSelect');
 
         // 新增：JWT登录逻辑
         async function loginAndGetToken() {
@@ -343,6 +388,16 @@
                             startAudioProcessing();
                             startVideoFrameSending();
                         }
+                        // 进入代码题阶段时隐藏问题区域
+                        if (data.phase === 'code') {
+                            questionDiv.textContent = data.text;
+                        }
+                    } else if (data.type === 'coding_problem') {
+                        // 显示代码题
+                        displayCodingProblem(data.problem);
+                    } else if (data.type === 'coding_answer_submitted') {
+                        alert('代码提交成功！');
+                        codeInput.value = '';  // 清空代码输入框
                     } else if (data.type === 'stream_created' || data.type === 'joined_stream') {
                         // 只有收到stream_created/joined_stream才允许推流
                         canStream = true;
@@ -516,6 +571,57 @@
             canStream = false;
             isRecording = false;
         };
+
+        // 新增：显示代码题
+        function displayCodingProblem(problem) {
+            problemTitle.textContent = `${problem.number} - ${problem.title}`;
+            problemDifficulty.textContent = problem.difficulty;
+            problemDescription.textContent = problem.description;
+            
+            if (problem.example) {
+                problemExample.textContent = `输入: ${problem.example.input}\n输出: ${problem.example.output}${problem.example.explanation ? '\n解释: ' + problem.example.explanation : ''}`;
+            } else {
+                problemExample.textContent = '暂无样例';
+            }
+            
+            // 显示代码题区域
+            codingProblemSection.style.display = 'block';
+            
+            // 隐藏问题显示
+            questionDiv.style.display = 'none';
+        }
+
+        // 新增：提交代码
+        function submitCode() {
+            const code = codeInput.value.trim();
+            const language = languageSelect.value;
+            
+            if (!code) {
+                alert('请输入代码');
+                return;
+            }
+            
+            if (ws && ws.readyState === 1) {
+                ws.send(JSON.stringify({
+                    type: 'submit_coding_answer',
+                    code: code,
+                    language: language
+                }));
+            } else {
+                alert('WebSocket连接未建立');
+            }
+        }
+
+        // 新增：请求下一题
+        function requestNextProblem() {
+            if (ws && ws.readyState === 1) {
+                ws.send(JSON.stringify({
+                    type: 'request_next_coding_problem'
+                }));
+            } else {
+                alert('WebSocket连接未建立');
+            }
+        }
     </script>
 </body>
 </html>
