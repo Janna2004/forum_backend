@@ -12,8 +12,6 @@ redis>=4.5.0
 uvicorn>=0.35.0
 django-cors-headers>=4.3.0
 requests>=2.31.0
-requests-toolbelt>=1.0.0
-openai>=1.0.0
 djangorestframework>=3.14.0
 uvicorn[standard]
 ultralytics
@@ -23,4 +21,9 @@ addict
 datasets>=4.0.0
 ffmpeg>=1.4
 ffmpeg-python>=0.2.0
-djangorestframework-simplejwt
+requests-toolbelt>=1.0.0
+openai>=1.97.0
+djangorestframework-simplejwt>=5.5.0
+celery>=5.5.3
+pymysql>=1.1.1
+transformers>=4.53.2
