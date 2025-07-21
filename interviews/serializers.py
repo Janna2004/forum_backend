@@ -51,4 +51,20 @@ class InterviewCreateSerializer(serializers.ModelSerializer):
             from django.utils import timezone
             validated_data['interview_time'] = timezone.now()
         
-        return super().create(validated_data) 
+        return super().create(validated_data)
+
+
+class InterviewListSerializer(serializers.ModelSerializer):
+    """面试列表序列化器"""
+    
+    class Meta:
+        model = Interview
+        fields = [
+            'id',
+            'interview_time',
+            'position_name',
+            'company_name',
+            'position_type',
+            'created_at',
+            'updated_at',
+        ] 

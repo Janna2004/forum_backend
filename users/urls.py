@@ -3,7 +3,8 @@ from .views import (
     register, login_view, get_user_profile, update_user_profile,
     get_resume, create_or_update_resume, manage_work_experience,
     manage_project_experience, manage_education_experience, manage_custom_section,
-    delete_work_experience, delete_project_experience, delete_education_experience, delete_custom_section
+    delete_work_experience, delete_project_experience, delete_education_experience, delete_custom_section,
+    get_user_resumes
 )
 
 urlpatterns = [
@@ -16,6 +17,7 @@ urlpatterns = [
     
     # 简历管理
     path('resume/', get_resume, name='get_resume'),
+    path('resume/list/', get_user_resumes, name='get_user_resumes'),  # 获取用户所有简历
     path('resume/create/', create_or_update_resume, name='create_or_update_resume'),
     
     # 工作经历管理

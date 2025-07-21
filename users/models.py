@@ -15,18 +15,25 @@ class User(AbstractUser):
 
 class Resume(models.Model):
     """简历模型"""
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='resume', verbose_name='用户')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='resumes', verbose_name='用户')
+    resume_name = models.CharField(max_length=100, verbose_name='简历名称', default='默认简历')
     name = models.CharField(max_length=50, verbose_name='姓名')
-    age = models.IntegerField(verbose_name='年龄')
-    graduation_date = models.DateField(verbose_name='毕业时间')
-    education_level = models.CharField(max_length=50, verbose_name='学历')
-    expected_position = models.CharField(max_length=100, verbose_name='期望职位')
+    age = models.IntegerField(verbose_name='年龄', null=True, blank=True)
+    graduation_date = models.DateField(verbose_name='毕业时间', null=True, blank=True)
+    education_level = models.CharField(max_length=50, verbose_name='学历', blank=True)
+    expected_position = models.CharField(max_length=100, verbose_name='期望职位', blank=True)
+    completed = models.BooleanField(default=False, verbose_name='是否完成')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
     
     class Meta:
         verbose_name = '简历'
         verbose_name_plural = '简历'
+        unique_together = ['user', 'resume_name']  # 确保同一用户的简历名称唯一
+        ordering = ['-updated_at']
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.resume_name}"
 
 class WorkExperience(models.Model):
     """工作/实习经历"""

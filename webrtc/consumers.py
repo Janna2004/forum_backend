@@ -49,6 +49,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         self.video_stream = None
         self.connection = None
         self.interview_id = None  # 面试ID
+        self.resume_id = None     # 简历ID
         self.rtasr_client = None  # 讯飞RTASR实例
         self.question_queue = []  # 面试问题队列
         self.phase = self.PHASE_INTRO
@@ -173,9 +174,12 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             title = data.get('title', '未命名流')
             description = data.get('description', '')
             self.interview_id = data.get('interview_id')  # 获取面试ID
+            self.resume_id = data.get('resume_id')       # 获取简历ID
             
             if not self.interview_id:
                 raise ValueError("缺少面试ID")
+            if not self.resume_id:
+                raise ValueError("缺少简历ID")
             
             # 创建视频流
             self.video_stream = await self.create_video_stream(title, description)
@@ -453,19 +457,62 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             }))
 
     async def init_question_queue(self):
-        """初始化面试问题队列（实际应根据岗位/简历信息调用知识库服务）"""
-        # TODO: 这里用测试数据，实际应从前端传岗位/简历id后调用KnowledgeBaseService
-        # 示例：job_position = JobPosition.objects.get(id=xxx)
-        #      resume = Resume.objects.get(id=xxx)
-        #      questions = KnowledgeBaseService().search_relevant_questions(job_position, resume, limit=5)
-        #      return [q['question'] for q in questions]
-        return [
-            '请简单自我介绍一下。',
-            '你为什么选择我们公司？',
-            '请介绍一下你最近的一个项目。',
-            '你遇到过最大的技术难题是什么？',
-            '你对未来的职业规划是什么？'
-        ]
+        """初始化面试问题队列（根据岗位/简历信息调用知识库服务）"""
+        try:
+            if not self.resume_id:
+                # 如果没有简历ID，返回默认问题
+                return [
+                    '请简单自我介绍一下。',
+                    '你为什么选择我们公司？',
+                    '请介绍一下你最近的一个项目。',
+                    '你遇到过最大的技术难题是什么？',
+                    '你对未来的职业规划是什么？'
+                ]
+            
+            # 获取简历信息
+            resume = await self.get_resume_by_id(self.resume_id)
+            if not resume:
+                print(f"[WebRTCConsumer] 简历不存在，使用默认问题队列")
+                return [
+                    '请简单自我介绍一下。',
+                    '你为什么选择我们公司？',
+                    '请介绍一下你最近的一个项目。',
+                    '你遇到过最大的技术难题是什么？',
+                    '你对未来的职业规划是什么？'
+                ]
+            
+            # 获取面试信息
+            interview = await self.get_interview_by_id(self.interview_id)
+            if interview and interview.job_position:
+                job_position = interview.job_position
+            else:
+                job_position = None
+            
+            # 调用知识库服务生成个性化问题
+            try:
+                kb_service = KnowledgeBaseService()
+                questions = await self.sync_to_async(kb_service.search_relevant_questions)(job_position, resume, limit=5)
+                return [q['question'] for q in questions]
+            except Exception as e:
+                print(f"[WebRTCConsumer] 调用知识库服务失败: {e}")
+                # 失败时返回基于简历的基础问题
+                return [
+                    f'请介绍一下你的{resume.expected_position}相关经验。',
+                    '你为什么选择我们公司？',
+                    '请介绍一下你最近的一个项目。',
+                    '你遇到过最大的技术难题是什么？',
+                    '你对未来的职业规划是什么？'
+                ]
+                
+        except Exception as e:
+            print(f"[WebRTCConsumer] init_question_queue error: {e}")
+            return [
+                '请简单自我介绍一下。',
+                '你为什么选择我们公司？',
+                '请介绍一下你最近的一个项目。',
+                '你遇到过最大的技术难题是什么？',
+                '你对未来的职业规划是什么？'
+            ]
     
     async def handle_disconnect(self, data):
         """处理断开连接请求"""
@@ -476,6 +523,27 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"断开连接失败: {str(e)}")
     
+    @database_sync_to_async
+    def get_resume_by_id(self, resume_id):
+        """根据简历ID获取简历信息"""
+        try:
+            return Resume.objects.select_related('user').get(id=resume_id, user=self.user)
+        except Resume.DoesNotExist:
+            return None
+    
+    @database_sync_to_async
+    def get_interview_by_id(self, interview_id):
+        """根据面试ID获取面试信息"""
+        try:
+            from interviews.models import Interview
+            return Interview.objects.select_related('job_position').get(id=interview_id, user=self.user)
+        except Interview.DoesNotExist:
+            return None
+    
+    def sync_to_async(self, func):
+        """将同步函数转换为异步函数"""
+        import asyncio
+        return asyncio.to_thread(func)
 
 
     async def handle_asr_result(self, text):

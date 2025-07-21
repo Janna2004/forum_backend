@@ -3,7 +3,7 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from .models import Interview
-from .serializers import InterviewCreateSerializer
+from .serializers import InterviewCreateSerializer, InterviewListSerializer
 
 # Create your views here.
 
@@ -25,3 +25,21 @@ class InterviewCreateView(generics.CreateAPIView):
             'position_type': interview.position_type,
             'msg': '面试创建成功'
         }, status=status.HTTP_201_CREATED)
+
+
+class InterviewListView(generics.ListAPIView):
+    """获取用户面试列表接口"""
+    serializer_class = InterviewListSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """只返回当前用户的面试记录"""
+        return Interview.objects.filter(user=self.request.user)
+    
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            'interviews': serializer.data,
+            'total': queryset.count()
+        }, status=status.HTTP_200_OK)

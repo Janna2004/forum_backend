@@ -91,21 +91,18 @@ def get_user_profile(request):
             'last_login': user.last_login
         }
         
-        # 获取简历信息
-        try:
-            resume = user.resume
-            profile_data['resume'] = {
-                'id': resume.id,
-                'name': resume.name,
-                'age': resume.age,
-                'graduation_date': resume.graduation_date.isoformat() if resume.graduation_date else None,
-                'education_level': resume.education_level,
+        # 获取简历信息（支持多简历）
+        resumes = user.resumes.all()
+        profile_data['resume'] = [
+            {
+                'resume_id': resume.id,
+                'resume_name': resume.resume_name,
                 'expected_position': resume.expected_position,
-                'created_at': resume.created_at.isoformat(),
-                'updated_at': resume.updated_at.isoformat()
+                'updated_at': resume.updated_at.isoformat(),
+                'completed': resume.completed
             }
-        except Resume.DoesNotExist:
-            profile_data['resume'] = None
+            for resume in resumes
+        ]
         
         return JsonResponse({
             'success': True,
@@ -151,9 +148,13 @@ def get_resume(request):
     """获取用户简历详细信息"""
     try:
         user = request.user
+        resume_id = request.GET.get('resume_id')
+        
+        if not resume_id:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
         
         try:
-            resume = user.resume
+            resume = Resume.objects.get(id=resume_id, user=user)
         except Resume.DoesNotExist:
             return JsonResponse({
                 'success': True,
@@ -243,41 +244,37 @@ def create_or_update_resume(request):
     try:
         user = request.user
         data = json.loads(request.body.decode())
+        resume_id = data.get('resume_id')
         
-        # 检查是否已存在简历
-        try:
-            resume = Resume.objects.get(user=user)
-            created = False
-        except Resume.DoesNotExist:
-            # 创建新简历时，需要提供所有必填字段
-            if not all(key in data for key in ['name', 'age', 'graduation_date', 'education_level', 'expected_position']):
-                return JsonResponse({
-                    'error': '创建简历时需要提供所有必填字段：name, age, graduation_date, education_level, expected_position'
-                }, status=400)
-            
-            resume = Resume.objects.create(
-                user=user,
-                name=data['name'],
-                age=data['age'],
-                graduation_date=data['graduation_date'],
-                education_level=data['education_level'],
-                expected_position=data['expected_position']
-            )
-            created = True
-        else:
+        if resume_id:
             # 更新现有简历
-            if 'name' in data:
-                resume.name = data['name']
-            if 'age' in data:
-                resume.age = data['age']
-            if 'graduation_date' in data:
-                resume.graduation_date = data['graduation_date']
-            if 'education_level' in data:
-                resume.education_level = data['education_level']
-            if 'expected_position' in data:
-                resume.expected_position = data['expected_position']
-            
-            resume.save()
+            try:
+                resume = Resume.objects.get(id=resume_id, user=user)
+                created = False
+            except Resume.DoesNotExist:
+                return JsonResponse({'error': '简历不存在'}, status=404)
+        else:
+            # 创建新简历
+            resume = Resume(user=user)
+            created = True
+        
+        # 更新简历字段
+        if 'resume_name' in data:
+            resume.resume_name = data['resume_name']
+        if 'name' in data:
+            resume.name = data['name']
+        if 'age' in data:
+            resume.age = data['age']
+        if 'graduation_date' in data:
+            resume.graduation_date = data['graduation_date']
+        if 'education_level' in data:
+            resume.education_level = data['education_level']
+        if 'expected_position' in data:
+            resume.expected_position = data['expected_position']
+        if 'completed' in data:
+            resume.completed = data['completed']
+        
+        resume.save()
         
         return JsonResponse({
             'success': True,
@@ -297,8 +294,13 @@ def manage_work_experience(request):
     try:
         user = request.user
         data = json.loads(request.body.decode())
-        resume = get_object_or_404(Resume, user=user)
+        resume_id = data.get('resume_id')
         work_id = data.get('work_id')
+        
+        if not resume_id:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
+        
+        resume = get_object_or_404(Resume, id=resume_id, user=user)
         
         if work_id is not None:
             # 更新：通过用户ID+工作经历ID验证权限
@@ -333,8 +335,13 @@ def manage_project_experience(request):
     try:
         user = request.user
         data = json.loads(request.body.decode())
-        resume = get_object_or_404(Resume, user=user)
+        resume_id = data.get('resume_id')
         project_id = data.get('project_id')
+        
+        if not resume_id:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
+        
+        resume = get_object_or_404(Resume, id=resume_id, user=user)
         
         if project_id is not None:
             # 更新：通过用户ID+项目经历ID验证权限
@@ -368,8 +375,13 @@ def manage_education_experience(request):
     try:
         user = request.user
         data = json.loads(request.body.decode())
-        resume = get_object_or_404(Resume, user=user)
+        resume_id = data.get('resume_id')
         education_id = data.get('education_id')
+        
+        if not resume_id:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
+        
+        resume = get_object_or_404(Resume, id=resume_id, user=user)
         
         if education_id is not None:
             # 更新：通过用户ID+教育经历ID验证权限
@@ -403,8 +415,13 @@ def manage_custom_section(request):
     try:
         user = request.user
         data = json.loads(request.body.decode())
-        resume = get_object_or_404(Resume, user=user)
+        resume_id = data.get('resume_id')
         custom_id = data.get('custom_id')
+        
+        if not resume_id:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
+        
+        resume = get_object_or_404(Resume, id=resume_id, user=user)
         
         if custom_id is not None:
             # 更新：通过用户ID+自定义部分ID验证权限
@@ -434,13 +451,16 @@ def delete_work_experience(request):
     try:
         user = request.user
         data = json.loads(request.body.decode())
+        resume_id = data.get('resume_id')
         work_id = data.get('work_id')
         
+        if not resume_id:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
         if not work_id:
             return JsonResponse({'error': '缺少work_id参数'}, status=400)
         
-        # 通过用户ID+工作经历ID验证权限
-        work_exp = get_object_or_404(WorkExperience, id=work_id, resume__user=user)
+        # 通过用户ID+简历ID+工作经历ID验证权限
+        work_exp = get_object_or_404(WorkExperience, id=work_id, resume_id=resume_id, resume__user=user)
         work_exp.delete()
         
         return JsonResponse({
@@ -460,13 +480,16 @@ def delete_project_experience(request):
     try:
         user = request.user
         data = json.loads(request.body.decode())
+        resume_id = data.get('resume_id')
         project_id = data.get('project_id')
         
+        if not resume_id:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
         if not project_id:
             return JsonResponse({'error': '缺少project_id参数'}, status=400)
         
-        # 通过用户ID+项目经历ID验证权限
-        project_exp = get_object_or_404(ProjectExperience, id=project_id, resume__user=user)
+        # 通过用户ID+简历ID+项目经历ID验证权限
+        project_exp = get_object_or_404(ProjectExperience, id=project_id, resume_id=resume_id, resume__user=user)
         project_exp.delete()
         
         return JsonResponse({
@@ -486,13 +509,16 @@ def delete_education_experience(request):
     try:
         user = request.user
         data = json.loads(request.body.decode())
+        resume_id = data.get('resume_id')
         education_id = data.get('education_id')
         
+        if not resume_id:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
         if not education_id:
             return JsonResponse({'error': '缺少education_id参数'}, status=400)
         
-        # 通过用户ID+教育经历ID验证权限
-        education_exp = get_object_or_404(EducationExperience, id=education_id, resume__user=user)
+        # 通过用户ID+简历ID+教育经历ID验证权限
+        education_exp = get_object_or_404(EducationExperience, id=education_id, resume_id=resume_id, resume__user=user)
         education_exp.delete()
         
         return JsonResponse({
@@ -512,18 +538,50 @@ def delete_custom_section(request):
     try:
         user = request.user
         data = json.loads(request.body.decode())
+        resume_id = data.get('resume_id')
         custom_id = data.get('custom_id')
         
+        if not resume_id:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
         if not custom_id:
             return JsonResponse({'error': '缺少custom_id参数'}, status=400)
         
-        # 通过用户ID+自定义部分ID验证权限
-        custom_section = get_object_or_404(CustomSection, id=custom_id, resume__user=user)
+        # 通过用户ID+简历ID+自定义部分ID验证权限
+        custom_section = get_object_or_404(CustomSection, id=custom_id, resume_id=resume_id, resume__user=user)
         custom_section.delete()
         
         return JsonResponse({
             'success': True,
             'msg': '自定义部分删除成功'
+        })
+        
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_resumes(request):
+    """获取用户所有简历列表"""
+    try:
+        user = request.user
+        resumes = user.resumes.all()
+        
+        resume_list = [
+            {
+                'resume_id': resume.id,
+                'resume_name': resume.resume_name,
+                'expected_position': resume.expected_position,
+                'updated_at': resume.updated_at.isoformat(),
+                'completed': resume.completed
+            }
+            for resume in resumes
+        ]
+        
+        return JsonResponse({
+            'success': True,
+            'resumes': resume_list,
+            'total': len(resume_list)
         })
         
     except Exception as e:

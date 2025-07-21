@@ -23,6 +23,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('users/', include('users.urls')),
     path('posts/', include('posts.urls')),
+    path('code/', include('code.urls')),  # 新增代码运行接口URL
     path('webrtc/', include('webrtc.urls')),
     path('knowledge-base/', include('knowledge_base.urls')),
     path('interviews/', include('interviews.urls')),  # 新增面试接口URL
