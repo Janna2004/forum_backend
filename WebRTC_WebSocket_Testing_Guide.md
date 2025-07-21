@@ -276,6 +276,19 @@ canvas.toBlob(blob => {
 }
 ```
 
+#### 7. 面试结束消息
+
+```json
+{
+  "type": "interview_finished",
+  "text": "面试已结束，感谢您的参与！我们会尽快给出面试评价。祝您求职顺利！"
+}
+```
+
+- 当面试全部环节（自我介绍、问答、代码题）完成后，后端会发送此消息。
+- 前端收到此消息后应显示结束提示，并关闭WebSocket连接。
+- 面试评价（包括问题回答分析、语音语调分析等）会异步进行，不会阻塞面试流程。
+
 ---
 
 ## 3. 典型消息流程（含代码题）
@@ -292,8 +305,12 @@ canvas.toBlob(blob => {
     - 后端推送 `coding_problem`，前端显示题目、样例、代码编辑区。
     - 前端填写代码，点击提交，发送 `submit_coding_answer`。
     - 后端返回 `coding_answer_submitted`。
-    - 前端可点击“下一题”发送 `request_next_coding_problem`，后端继续推送下一道 `coding_problem`。
-    - 题目做完后，后端推送 `interview_message`（phase: code, text: "代码题环节结束。面试完毕！"）。
+    - 前端可点击"下一题"发送 `request_next_coding_problem`，后端继续推送下一道 `coding_problem`。
+    - 所有题目完成后，后端推送 `interview_message`（phase: code, text: "代码题环节结束。"）。
+10. **面试结束**：
+    - 后端推送 `interview_finished` 消息。
+    - 前端显示结束提示，关闭WebSocket连接。
+    - 后端异步处理面试评价（问题分析、语音分析等）。
 
 ---
 

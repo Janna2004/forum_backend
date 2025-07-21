@@ -9,6 +9,26 @@ from urllib.parse import urlencode, quote
 import websocket
 from websocket import create_connection, WebSocketConnectionClosedException
 from django.conf import settings
+import os
+import requests
+import datetime
+import hashlib
+import base64
+import hmac
+import json
+import re
+from django.conf import settings
+import time
+import base64
+import urllib  # 补充导入
+import urllib.parse
+from datetime import datetime
+from wsgiref.handlers import format_date_time
+from time import mktime
+from urllib.parse import urlparse, quote
+from urllib3 import encode_multipart_formdata
+import math
+import traceback
 
 class XunfeiRealtimeTranscribeClient:
     """
@@ -173,6 +193,413 @@ class XunfeiRTASRClient:
             self.ws.close()
         self.connected = False
         self.closed = True 
+
+class XunfeiTranscriptionService:
+    def __init__(self):
+        self.Host = "ost-api.xfyun.cn"
+        self.RequestUriCreate = "/v2/ost/pro_create"
+        self.RequestUriQuery = "/v2/ost/query"
+        
+        # 设置URL
+        self.urlCreate = f"https://{self.Host}{self.RequestUriCreate}"
+        self.urlQuery = f"https://{self.Host}{self.RequestUriQuery}"
+        
+        self.HttpMethod = "POST"
+        self.APPID = settings.XUNFEI_APP_ID
+        self.Algorithm = "hmac-sha256"
+        self.HttpProto = "HTTP/1.1"
+        self.UserName = settings.XUNFEI_API_KEY
+        self.Secret = settings.XUNFEI_API_SECRET
+        
+        # 业务参数
+        self.BusinessArgsCreate = {
+            "language": "zh_cn",
+            "accent": "mandarin",
+            "domain": "pro_ost_ed",
+        }
+
+    def hashlib_256(self, data):
+        m = hashlib.sha256(bytes(data.encode(encoding='utf-8'))).digest()
+        result = "SHA-256=" + base64.b64encode(m).decode(encoding='utf-8')
+        return result
+
+    def httpdate(self, dt):
+        weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()]
+        month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+                 "Oct", "Nov", "Dec"][dt.month - 1]
+        return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
+                                                        dt.year, dt.hour, dt.minute, dt.second)
+
+    def generateSignature(self, digest, uri, date):
+        signature_str = f"host: {self.Host}\n"
+        signature_str += f"date: {date}\n"
+        signature_str += f"{self.HttpMethod} {uri} {self.HttpProto}\n"
+        signature_str += f"digest: {digest}"
+        print(f"[调试] 签名字符串: {signature_str}")
+        signature = hmac.new(bytes(self.Secret.encode('utf-8')),
+                           bytes(signature_str.encode('utf-8')),
+                           digestmod=hashlib.sha256).digest()
+        return base64.b64encode(signature).decode(encoding='utf-8')
+
+    def init_header(self, data, uri):
+        now = datetime.now()
+        date = format_date_time(mktime(now.timetuple()))
+        
+        digest = self.hashlib_256(data)
+        sign = self.generateSignature(digest, uri, date)
+        auth_header = f'api_key="{self.UserName}",algorithm="{self.Algorithm}", ' \
+                     f'headers="host date request-line digest", signature="{sign}"'
+        
+        print(f"[调试] 认证头: {auth_header}")
+        
+        return {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Method": self.HttpMethod,
+            "Host": self.Host,
+            "Date": date,
+            "Digest": digest,
+            "Authorization": auth_header,
+            "X-Date": date,  # 添加 X-Date 头
+        }
+
+    def call_api(self, url, body, headers):
+        try:
+            print(f"[调试] 请求URL: {url}")
+            print(f"[调试] 请求头: {headers}")
+            print(f"[调试] 请求体: {body}")
+            response = requests.post(url, data=body, headers=headers, timeout=8)
+            print(f"[调试] 响应状态码: {response.status_code}")
+            print(f"[调试] 响应头: {response.headers}")
+            print(f"[调试] 响应内容: {response.text}")
+            if response.status_code != 200:
+                print(f"[调试] 讯飞API调用失败: {response.content}")
+                return None
+            return response.json()
+        except Exception as e:
+            print(f"[调试] 讯飞API调用异常: {str(e)}")
+            return None
+
+    def create_task(self, audio_url):
+        """创建转写任务"""
+        # 确保URL是正确编码的
+        if not audio_url.startswith('http'):
+            audio_url = f"https://{audio_url}"
+        audio_url = quote(audio_url, safe=':/?=')
+        
+        body = json.dumps({
+            "common": {"app_id": self.APPID},
+            "business": self.BusinessArgsCreate,
+            "data": {
+                "audio_src": "http",
+                "audio_url": audio_url,
+                "encoding": "raw"
+            }
+        })
+        
+        headers = self.init_header(body, self.RequestUriCreate)
+        return self.call_api(self.urlCreate, body, headers)
+
+    def query_task(self, task_id):
+        """查询转写任务状态"""
+        body = json.dumps({
+            "common": {"app_id": self.APPID},
+            "business": {
+                "task_id": task_id,
+            },
+        })
+        
+        headers = self.init_header(body, self.RequestUriQuery)
+        return self.call_api(self.urlQuery, body, headers)
+
+    def get_create_body(self, audio_url):
+        return json.dumps({
+            "common": {"app_id": self.APPID},
+            "business": self.BusinessArgsCreate,
+            "data": {
+                "audio_src": "http",
+                "audio_url": audio_url,
+                "encoding": "raw"
+            }
+        })
+
+    def get_query_body(self, task_id):
+        return json.dumps({
+            "common": {"app_id": self.APPID},
+            "business": {
+                "task_id": task_id,
+            },
+        })
+
+    async def transcribe_audio(self, audio_url):
+        """转写音频文件"""
+        print(f"[调试] 开始转写音频: {audio_url}")
+        
+        # 创建任务
+        create_body = self.get_create_body(audio_url)
+        create_headers = self.init_header(create_body, self.RequestUriCreate)
+        create_response = self.call_api(self.urlCreate, create_body, create_headers)
+        
+        if not create_response or 'data' not in create_response:
+            print("[调试] 创建转写任务失败")
+            return None
+            
+        task_id = create_response['data']['task_id']
+        print(f"[调试] 创建转写任务成功，task_id: {task_id}")
+        
+        # 轮询查询结果
+        max_retries = 30  # 最多等待5分钟
+        query_body = self.get_query_body(task_id)
+        query_headers = self.init_header(query_body, self.RequestUriQuery)
+        
+        for _ in range(max_retries):
+            query_response = self.call_api(self.urlQuery, query_body, query_headers)
+            if not query_response or 'data' not in query_response:
+                print("[调试] 查询转写结果失败")
+                return None
+                
+            status = query_response['data']['task_status']
+            if status == '9':  # 转写成功
+                print("[调试] 转写成功")
+                return query_response['data'].get('result', {}).get('text', '')
+            elif status in ['3', '4']:  # 转写失败
+                print(f"[调试] 转写失败: {query_response}")
+                return None
+                
+            time.sleep(10)  # 等待10秒后重试
+            
+        print("[调试] 转写超时")
+        return None
+
+class XunfeiASRService:
+    def __init__(self, file_path):
+        self.lfasr_host = 'https://raasr.xfyun.cn/v2/api'
+        self.api_upload = '/upload'
+        self.api_get_result = '/getResult'
+        self.appid = settings.XUNFEI_APP_ID
+        self.secret_key = settings.XUNFEI_SECRET_KEY
+        self.file_path = file_path
+        self.ts = str(int(time.time()))
+        self.signa = self.get_signa()
+
+    def get_signa(self):
+        m2 = hashlib.md5()
+        m2.update((self.appid + self.ts).encode('utf-8'))
+        md5 = m2.hexdigest()
+        md5 = bytes(md5, encoding='utf-8')
+        signa = hmac.new(self.secret_key.encode('utf-8'), md5, hashlib.sha1).digest()
+        signa = base64.b64encode(signa)
+        return str(signa, 'utf-8')
+
+    def upload(self):
+        file_len = os.path.getsize(self.file_path)
+        file_name = os.path.basename(self.file_path)
+        param_dict = {
+            'appId': self.appid,
+            'signa': self.signa,
+            'ts': self.ts,
+            'fileSize': file_len,
+            'fileName': file_name,
+            'duration': "200"
+        }
+        with open(self.file_path, 'rb') as f:
+            data = f.read(file_len)
+        response = requests.post(
+            url=self.lfasr_host + self.api_upload + "?" + urllib.parse.urlencode(param_dict),
+            headers={"Content-type": "application/json"},
+            data=data
+        )
+        result = json.loads(response.text)
+        return result
+
+    def get_result(self):
+        uploadresp = self.upload()
+        print(f"[调试] uploadresp: {uploadresp}")
+        if not (uploadresp.get('ok') == 0 or uploadresp.get('code') == '000000'):
+            print(f"[调试] 上传失败: {uploadresp}")
+            return None
+        orderId = None
+        if 'content' in uploadresp and 'orderId' in uploadresp['content']:
+            orderId = uploadresp['content']['orderId']
+        elif 'orderId' in uploadresp:
+            orderId = uploadresp['orderId']
+        print(f"[调试] orderId: {orderId}")
+        if not orderId:
+            print(f"[调试] 未获取到orderId: {uploadresp}")
+            return None
+        param_dict = {
+            'appId': self.appid,
+            'signa': self.signa,
+            'ts': self.ts,
+            'orderId': orderId,
+            'resultType': "transfer,predict"
+        }
+        status = 3
+        result = None
+        while status == 3:
+            response = requests.post(
+                url=self.lfasr_host + self.api_get_result + "?" + urllib.parse.urlencode(param_dict),
+                headers={"Content-type": "application/json"}
+            )
+            result = json.loads(response.text)
+            print(f"[调试] 查询result: {result}")
+            status = result['content']['orderInfo']['status']
+            if status == 4:
+                break
+            time.sleep(5)
+        if result and (result.get('ok') == 0 or result.get('code') == '000000'):
+            try:
+                order_result = result['content']['orderResult']
+                order_result_json = json.loads(order_result)
+                sentences = []
+                
+                # 优先使用 lattice2（更新的格式）
+                if isinstance(order_result_json, dict):
+                    if 'lattice2' in order_result_json:
+                        for item in order_result_json['lattice2']:
+                            if 'json_1best' in item and isinstance(item['json_1best'], dict) and 'st' in item['json_1best']:
+                                ws = item['json_1best']['st'].get('rt', [])
+                                for seg in ws:
+                                    for w in seg.get('ws', []):
+                                        for cw in w.get('cw', []):
+                                            word = cw.get('w', '')
+                                            if word and word != '':  # 跳过空字符
+                                                sentences.append(word)
+                    # 如果没有 lattice2 才使用 lattice
+                    elif 'lattice' in order_result_json:
+                        for item in order_result_json['lattice']:
+                            if 'json_1best' in item:
+                                j1 = json.loads(item['json_1best'])
+                                if 'st' in j1:
+                                    ws = j1['st'].get('rt', [])
+                                    for seg in ws:
+                                        for w in seg.get('ws', []):
+                                            for cw in w.get('cw', []):
+                                                word = cw.get('w', '')
+                                                if word and word != '':  # 跳过空字符
+                                                    sentences.append(word)
+                # 兼容老格式
+                elif isinstance(order_result_json, list):
+                    for item in order_result_json:
+                        if 'onebest' in item:
+                            sentences.append(item['onebest'])
+                
+                text = ''.join(sentences)
+                print(f'[调试] 解析文本: {text}')
+                return text
+            except Exception as e:
+                print(f"[调试] 解析结果异常: {str(e)}")
+                print(traceback.format_exc())  # 添加详细错误信息
+                return None
+        print(f"[调试] 获取结果失败: {result}")
+        return None
+
+class FileUploadService:
+    def __init__(self):
+        self.lfasr_host = 'http://upload-ost-api.xfyun.cn/file'
+        self.api_init = '/mpupload/init'
+        self.api_upload = '/upload'
+        self.api_cut = '/mpupload/upload'
+        self.api_cut_complete = '/mpupload/complete'
+        self.api_cut_cancel = '/mpupload/cancel'
+        self.file_piece_size = 5242880  # 5MB
+        
+        self.app_id = settings.XUNFEI_APP_ID
+        self.api_key = settings.XUNFEI_API_KEY
+        self.api_secret = settings.XUNFEI_API_SECRET
+        self.request_id = self.get_request_id()
+        self.cloud_id = '0'
+
+    def get_request_id(self):
+        return time.strftime("%Y%m%d%H%M")
+
+    def hashlib_256(self, data):
+        m = hashlib.sha256(bytes(data.encode(encoding='utf-8'))).digest()
+        digest = "SHA-256=" + base64.b64encode(m).decode(encoding='utf-8')
+        return digest
+
+    def assemble_auth_header(self, request_url, file_data_type, method="", body=""):
+        u = urlparse(request_url)
+        host = u.hostname
+        path = u.path
+        now = datetime.now()
+        date = format_date_time(mktime(now.timetuple()))
+        digest = "SHA256=" + self.hashlib_256('')
+        signature_origin = f"host: {host}\ndate: {date}\n{method} {path} HTTP/1.1\ndigest: {digest}"
+        signature_sha = hmac.new(self.api_secret.encode('utf-8'), signature_origin.encode('utf-8'),
+                               digestmod=hashlib.sha256).digest()
+        signature_sha = base64.b64encode(signature_sha).decode(encoding='utf-8')
+        authorization = f'api_key="{self.api_key}", algorithm="hmac-sha256", ' \
+                       f'headers="host date request-line digest", signature="{signature_sha}"'
+        
+        return {
+            "host": host,
+            "date": date,
+            "authorization": authorization,
+            "digest": digest,
+            'content-type': file_data_type,
+        }
+
+    def call_api(self, url, file_data, file_data_type):
+        headers = self.assemble_auth_header(url, file_data_type, method="POST")
+        try:
+            print(f"[调试] 上传请求 - URL: {url}")
+            print(f"[调试] 上传请求 - 头: {headers}")
+            response = requests.post(url, data=file_data, headers=headers, timeout=8)
+            print(f"[调试] 上传响应 - 状态: {response.status_code}, 内容: {response.text}")
+            if response.status_code != 200:
+                return None
+            return response.json()
+        except Exception as e:
+            print(f"[调试] 上传异常: {str(e)}")
+            return None
+
+    def upload_file(self, file_path):
+        """上传文件"""
+        try:
+            # 直接读取文件内容并进行base64编码
+            with open(file_path, 'rb') as f:
+                audio_data = f.read()
+            audio_base64 = base64.b64encode(audio_data).decode('utf-8')
+            
+            # 构建请求体
+            body = {
+                "common": {"app_id": self.app_id},
+                "data": {
+                    "audio": audio_base64
+                }
+            }
+            
+            # 发送请求
+            url = self.lfasr_host + self.api_upload
+            headers = {
+                'Content-Type': 'application/json',
+                'X-Appid': self.app_id,
+                'X-CurTime': str(int(time.time())),
+                'X-Param': base64.b64encode(json.dumps({}).encode('utf-8')).decode('utf-8')
+            }
+            
+            # 计算签名
+            x_checksum_str = self.api_key + headers['X-CurTime'] + headers['X-Param']
+            headers['X-CheckSum'] = hashlib.md5(x_checksum_str.encode('utf-8')).hexdigest()
+            
+            print(f"[调试] 上传请求 - URL: {url}")
+            print(f"[调试] 上传请求 - 头: {headers}")
+            
+            response = requests.post(url, json=body, headers=headers, timeout=30)
+            print(f"[调试] 上传响应 - 状态: {response.status_code}, 内容: {response.text}")
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('code') == 0:
+                    return result['data']['audio_url']
+            
+            print(f"[调试] 文件上传失败: {response.text}")
+            return None
+            
+        except Exception as e:
+            print(f"[调试] 文件上传异常: {str(e)}")
+            return None
 
 class CodingProblemService:
     """代码题选择服务"""

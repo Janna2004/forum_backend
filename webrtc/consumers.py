@@ -31,6 +31,7 @@ import ffmpeg
 import numpy as np
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 from openai import OpenAI
+import traceback
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -186,6 +187,8 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 raise ValueError("缺少面试ID")
             if not self.resume_id:
                 raise ValueError("缺少简历ID")
+            
+            print("[调试] handle_create_stream - interview_id:", self.interview_id, "resume_id:", self.resume_id)
             
             # 创建视频流
             self.video_stream = await self.create_video_stream(title, description)
@@ -463,10 +466,12 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             }))
 
     async def init_question_queue(self):
-        """初始化面试问题队列（根据岗位/简历信息调用知识库服务）"""
+        """初始化面试问题队列"""
         try:
-            if not self.resume_id:
-                # 如果没有简历ID，返回默认问题
+            print("[调试] init_question_queue - interview_id:", self.interview_id, "resume_id:", self.resume_id)
+            
+            if not self.interview_id or not self.resume_id:
+                print("[调试] init_question_queue - 缺少interview_id或resume_id")
                 return [
                     '请简单自我介绍一下。',
                     '你为什么选择我们公司？',
@@ -475,43 +480,49 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                     '你对未来的职业规划是什么？'
                 ]
             
-            # 获取简历信息
-            resume = await self.get_resume_by_id(self.resume_id)
-            if not resume:
-                print(f"[WebRTCConsumer] 简历不存在，使用默认问题队列")
-                return [
-                    '请简单自我介绍一下。',
-                    '你为什么选择我们公司？',
-                    '请介绍一下你最近的一个项目。',
-                    '你遇到过最大的技术难题是什么？',
-                    '你对未来的职业规划是什么？'
-                ]
+            # 获取面试和简历信息
+            from interviews.models import Interview
+            from users.models import Resume
             
-            # 获取面试信息
-            interview = await self.get_interview_by_id(self.interview_id)
-            if interview and interview.job_position:
-                job_position = interview.job_position
-            else:
-                job_position = None
-            
-            # 调用知识库服务生成个性化问题
             try:
-                kb_service = KnowledgeBaseService()
-                questions = await self.sync_to_async(kb_service.search_relevant_questions)(job_position, resume, limit=5)
-                return [q['question'] for q in questions]
-            except Exception as e:
-                print(f"[WebRTCConsumer] 调用知识库服务失败: {e}")
-                # 失败时返回基于简历的基础问题
+                interview = await database_sync_to_async(Interview.objects.get)(id=self.interview_id)
+                print("[调试] init_question_queue - 获取到interview:", interview)
+            except Interview.DoesNotExist:
+                print("[调试] init_question_queue - 面试不存在:", self.interview_id)
                 return [
-                    f'请介绍一下你的{resume.expected_position}相关经验。',
+                    '请简单自我介绍一下。',
                     '你为什么选择我们公司？',
                     '请介绍一下你最近的一个项目。',
                     '你遇到过最大的技术难题是什么？',
                     '你对未来的职业规划是什么？'
                 ]
-                
+            
+            try:
+                resume = await database_sync_to_async(Resume.objects.get)(id=self.resume_id)
+                print("[调试] init_question_queue - 获取到resume:", resume)
+            except Resume.DoesNotExist:
+                print("[调试] init_question_queue - 简历不存在:", self.resume_id)
+                return [
+                    '请简单自我介绍一下。',
+                    '你为什么选择我们公司？',
+                    '请介绍一下你最近的一个项目。',
+                    '你遇到过最大的技术难题是什么？',
+                    '你对未来的职业规划是什么？'
+                ]
+            
+            # 调用知识库服务
+            from knowledge_base.services import KnowledgeBaseService
+            kb_service = KnowledgeBaseService()
+            
+            # 使用database_sync_to_async包装同步方法
+            search_questions = database_sync_to_async(kb_service.search_relevant_questions)
+            questions = await search_questions(interview.position_type, resume, limit=5)
+            
+            print("[调试] init_question_queue - 获取到问题:", questions)
+            return questions
+            
         except Exception as e:
-            print(f"[WebRTCConsumer] init_question_queue error: {e}")
+            print(f"[调试] init_question_queue错误: {e}")
             return [
                 '请简单自我介绍一下。',
                 '你为什么选择我们公司？',
@@ -553,45 +564,54 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
 
 
     async def handle_asr_result(self, text):
-        # 只处理中文文本
-        asr_text = ''
+        """处理语音识别结果"""
         try:
-            obj = json.loads(text) if isinstance(text, str) else text
+            # 只处理中文文本
+            if not text:
+                return
+            
+            # 递归提取所有字符串中的中文
             def extract_chinese(obj):
                 result = ''
                 if isinstance(obj, str):
-                    result += ''.join([c for c in obj if '\u4e00' <= c <= '\u9fa5'])
+                    # 匹配所有中文
+                    result += ''.join(char for char in obj if '\u4e00' <= char <= '\u9fff' or char in '，。！？、；：""''（）《》【】')
                 elif isinstance(obj, list):
                     for item in obj:
                         result += extract_chinese(item)
                 elif isinstance(obj, dict):
-                    for v in obj.values():
-                        result += extract_chinese(v)
+                    for key in obj:
+                        result += extract_chinese(obj[key])
                 return result
-            asr_text = extract_chinese(obj)
-        except Exception:
-            asr_text = str(text)
-        print("[调试] handle_asr_result asr_text:", asr_text)
-        print("[调试] handle_asr_result phase:", self.phase, "current_question:", self.current_question)
-        self.last_asr_text = asr_text
-        # 记录答案（自我介绍和问答阶段都记录）
-        if self.current_question and asr_text.strip():
-            print("[调试] handle_asr_result append to current_answer_final:", asr_text.strip())
-            self.current_answer_final.append(asr_text.strip())
-        print("[调试] handle_asr_result current_answer_final:", self.current_answer_final)
-        # 检查“说完了”
-        if '说完了' in asr_text:
-            print("[调试] handle_asr_result 检测到说完了，准备保存答案")
-            if self.phase == self.PHASE_INTRO:
-                await self.finish_intro()
-            elif self.phase == self.PHASE_QUESTION:
-                await self.save_current_answer()
-                await self.next_question()
-        # 每次都推送转写内容给前端
-        await self.send(text_data=json.dumps({
-            'type': 'asr_result',
-            'text': asr_text
-        }))
+            
+            # 如果text是JSON字符串，尝试提取所有中文
+            try:
+                obj = json.loads(text) if isinstance(text, str) else text
+                text = extract_chinese(obj)
+            except:
+                pass
+            
+            # 更新当前回答
+            if self.phase == self.PHASE_INTRO or self.phase == self.PHASE_QUESTION:
+                if text:
+                    self.current_answer_sentences.append(text)
+                    # 如果检测到说完了，保存答案
+                    if "说完了" in text or "完毕" in text:
+                        print("[调试] handle_asr_result current_answer_final:", self.current_answer_final)
+                        print("[调试] handle_asr_result 检测到说完了，准备保存答案")
+                        # 更新最终答案
+                        self.current_answer_final = self.current_answer_sentences
+                        await self.save_current_answer()
+                        await self.next_question()
+                    
+            # 发送转写结果给前端
+            await self.send(text_data=json.dumps({
+                'type': 'asr_result',
+                'text': text
+            }))
+            
+        except Exception as e:
+            print(f"[调试] handle_asr_result错误: {e}")
 
     async def finish_intro(self):
         self.phase = self.PHASE_QUESTION
@@ -632,34 +652,70 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             await self.start_coding_problems()
 
     async def save_current_answer(self):
+        """保存当前问题的答案"""
         print("[调试] save_current_answer called, current_question:", self.current_question)
         print("[调试] save_current_answer called, current_answer_final:", self.current_answer_final)
         if not self.video_stream:
             print("[调试] save_current_answer异常: video_stream 未初始化")
             return
         if self.current_question and self.current_answer_final:
+            # 将列表中的答案合并为完整文本
             answer_text = '\n'.join(self.current_answer_final)
             print("[调试] answer_text:", answer_text)
             try:
                 from interviews.models import Interview, InterviewAnswer
                 # 获取面试记录
-                interview = await database_sync_to_async(Interview.objects.get)(id=self.interview_id)
-                await database_sync_to_async(InterviewAnswer.objects.create)(
+                interview = await self.get_interview_by_id(self.interview_id)
+                answer = await database_sync_to_async(InterviewAnswer.objects.create)(
                     interview=interview,
                     user=self.user,
                     question=self.current_question,
                     answer=answer_text
                 )
+                
                 # 保存音视频片段
                 av_path = await self.save_av_clip_for_question()
-                print("[调试] 调用analyze_confidence_fluency，参数：", self.current_question, answer_text, av_path)
-                await self.analyze_confidence_fluency(self.current_question, answer_text, av_path)
+                
+                # 将分析任务加入队列
+                from interviews.tasks import analyze_interview_answer
+                await database_sync_to_async(analyze_interview_answer.delay)(str(answer.id), av_path)
+                print(f"[调试] 已创建答案记录并加入分析队列 - id: {answer.id}, av_path: {av_path}")
+                
+                # 清空当前问题和答案
+                self.current_question = None
+                self.current_answer_final = []
+                self.current_answer_sentences = []
+                self.current_answer_start_time = None
+                
             except Exception as e:
-                print("[调试] save_current_answer异常:", e)
-        self.current_question = None
-        self.current_answer_final = []
-        self.current_answer_sentences = []
-        self.current_answer_start_time = None
+                print(f"[调试] save_current_answer错误: {e}")
+                print(traceback.format_exc())
+
+    async def finish_interview(self):
+        """结束面试"""
+        try:
+            # 发送面试结束消息
+            await self.send(text_data=json.dumps({
+                'type': 'interview_finished',
+                'text': '面试已结束，感谢您的参与！我们会尽快给出面试评价。祝您求职顺利！'
+            }))
+            
+            # 更新面试状态
+            from interviews.models import Interview
+            interview = await self.get_interview_by_id(self.interview_id)
+            if interview:
+                await database_sync_to_async(setattr)(interview, 'status', 'completed')
+                await database_sync_to_async(interview.save)()
+            
+            # 关闭WebSocket连接
+            await self.close()
+            
+        except Exception as e:
+            print(f"[调试] finish_interview错误: {e}")
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'text': f'结束面试时出错: {str(e)}'
+            }))
 
     async def save_av_clip_for_question(self):
         """
@@ -903,11 +959,13 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     async def start_next_coding_problem(self):
         """开始下一道代码题"""
         if not self.coding_problems:
+            # 面试全部结束
             await self.send(text_data=json.dumps({
                 'type': 'interview_message',
                 'phase': self.PHASE_CODE,
-                'text': '代码题环节结束。面试完毕！'
+                'text': '代码题环节结束。'
             }))
+            await self.finish_interview()
             return
         
         # 取出下一道题

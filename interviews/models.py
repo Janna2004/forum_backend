@@ -46,6 +46,9 @@ class InterviewAnswer(models.Model):
     question = models.TextField(verbose_name='问题')
     answer = models.TextField(verbose_name='答案')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='答题时间')
+    ai_analysis = models.TextField(blank=True, null=True, verbose_name='AI分析结果')
+    confidence_score = models.FloatField(default=0, verbose_name='信心得分')
+    fluency_score = models.FloatField(default=0, verbose_name='流畅度得分')
 
     class Meta:
         verbose_name = '面试答题记录'
