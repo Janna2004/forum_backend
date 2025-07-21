@@ -22,10 +22,28 @@ class JwtHeaderOrUrlAuthMiddleware:
             try:
                 from django.contrib.auth import get_user_model
                 User = get_user_model()
-                payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
-                print("[中间件] jwt payload:", payload)
-                user = await sync_to_async(User.objects.get)(id=payload['user_id'])
-                print("[中间件] user查找成功:", user)
+                
+                # 使用simplejwt库验证token - 将导入移到这里避免启动问题
+                try:
+                    from rest_framework_simplejwt.tokens import UntypedToken
+                    from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+                    
+                    # 验证token是否有效
+                    UntypedToken(token)
+                    # 解码token获取payload
+                    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+                    print("[中间件] jwt payload:", payload)
+                    user_id = payload.get('user_id')
+                    if user_id:
+                        user = await sync_to_async(User.objects.get)(id=user_id)
+                        print("[中间件] user查找成功:", user)
+                    else:
+                        print("[中间件] token中没有user_id字段")
+                        user = None
+                except (InvalidToken, TokenError) as e:
+                    print("[中间件] simplejwt token验证失败:", e)
+                    user = None
+                    
             except Exception as e:
                 print("[中间件] jwt解析或user查找失败:", e)
                 user = None

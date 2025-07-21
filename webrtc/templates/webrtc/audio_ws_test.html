@@ -214,7 +214,7 @@
             ws.onclose = () => {
                 isRecording = false;
                 canStream = false;
-                stopAudioProcessing();
+                if (typeof window._stopAudioProcessing === 'function') window._stopAudioProcessing();
                 stopVideoFrameSending();
                 finishBtn.disabled = true;
             };
