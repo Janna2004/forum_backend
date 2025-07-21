@@ -110,6 +110,7 @@ def get_user_profile(request):
         })
         
     except Exception as e:
+        print('[get_user_profile异常]', e)
         return JsonResponse({'error': str(e)}, status=500)
 
 @api_view(['POST'])
@@ -164,7 +165,7 @@ def get_resume(request):
         
         # 构建简历数据
         resume_data = {
-            'id': resume.id,
+            'resume_id': resume.id,
             'name': resume.name,
             'age': resume.age,
             'graduation_date': resume.graduation_date.isoformat() if resume.graduation_date else None,
