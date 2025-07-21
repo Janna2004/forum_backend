@@ -10,6 +10,12 @@ tags:
   - name: 个人信息管理
   - name: 简历管理
   - name: interviews
+  - name: 职位管理
+    description: 职位信息相关接口
+  - name: 知识库管理
+    description: 面试知识库相关接口
+  - name: WebRTC
+    description: WebRTC相关接口
 paths:
   /users/register/:
     post:
@@ -2502,6 +2508,372 @@ paths:
           $ref: '#/components/responses/UnauthorizedError'
         '404':
           description: 代码题不存在
+
+  /positions/positions/:
+    get:
+      summary: 获取职位列表
+      deprecated: false
+      description: 分页获取所有职位信息
+      tags:
+        - 职位管理
+      parameters:
+        - name: page
+          in: query
+          description: 页码（从1开始）
+          schema:
+            type: integer
+            default: 1
+        - name: ordering
+          in: query
+          description: 排序字段（可选，支持id、company_name等字段，前缀-表示降序）
+          schema:
+            type: string
+            example: "-id"
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    description: 总记录数
+                  next:
+                    type: string
+                    nullable: true
+                    description: 下一页URL
+                  previous:
+                    type: string
+                    nullable: true
+                    description: 上一页URL
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                          example: 1
+                        position_name:
+                          type: string
+                          example: "后端开发工程师"
+                        company_name:
+                          type: string
+                          example: "某科技公司"
+                        position_url:
+                          type: string
+                          example: "https://example.com/job/123"
+
+  /positions/positions/search/:
+    get:
+      summary: 搜索职位
+      deprecated: false
+      description: 根据关键词搜索职位信息（支持职位名称和公司名称）
+      tags:
+        - 职位管理
+      parameters:
+        - name: keyword
+          in: query
+          description: 搜索关键词
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          description: 页码（从1开始）
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: 搜索成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    description: 总记录数
+                  next:
+                    type: string
+                    nullable: true
+                    description: 下一页URL
+                  previous:
+                    type: string
+                    nullable: true
+                    description: 上一页URL
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                          example: 1
+                        position_name:
+                          type: string
+                          example: "后端开发工程师"
+                        company_name:
+                          type: string
+                          example: "某科技公司"
+                        position_url:
+                          type: string
+                          example: "https://example.com/job/123"
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "请提供搜索关键词"
+
+  /positions/positions/{id}/:
+    get:
+      summary: 获取职位详情
+      deprecated: false
+      description: 获取指定职位的详细信息
+      tags:
+        - 职位管理
+      parameters:
+        - name: id
+          in: path
+          description: 职位ID
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                    example: 1
+                  position_name:
+                    type: string
+                    example: "后端开发工程师"
+                  company_name:
+                    type: string
+                    example: "某科技公司"
+                  position_url:
+                    type: string
+                    example: "https://example.com/job/123"
+        '404':
+          description: 职位不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "职位不存在"
+
+  /knowledge-base/generate-questions/:
+    post:
+      summary: 生成面试问题
+      deprecated: false
+      description: 根据职位类型生成面试问题
+      tags:
+        - 知识库管理
+      parameters:
+        - name: Authorization
+          in: header
+          description: JWT认证令牌
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - position_type
+              properties:
+                position_type:
+                  type: string
+                  enum: [backend, frontend, algo, pm, qa]
+                  description: 职位类型
+      responses:
+        '200':
+          description: 成功生成问题
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  questions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        question:
+                          type: string
+                          example: "什么是RESTful API？"
+                        answer:
+                          type: string
+                          example: "RESTful API是一种软件架构风格..."
+        '400':
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "职位类型不正确"
+
+  /knowledge-base/interview-history/:
+    get:
+      summary: 获取面试历史
+      deprecated: false
+      description: 获取用户的面试问答历史记录
+      tags:
+        - 知识库管理
+      parameters:
+        - name: Authorization
+          in: header
+          description: JWT认证令牌
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  history:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                          example: 1
+                        question:
+                          type: string
+                          example: "什么是RESTful API？"
+                        answer:
+                          type: string
+                          example: "用户的回答..."
+                        created_at:
+                          type: string
+                          format: date-time
+
+  /knowledge-base/interview-detail/{interview_id}/:
+    get:
+      summary: 获取面试详情
+      deprecated: false
+      description: 获取特定面试的详细信息
+      tags:
+        - 知识库管理
+      parameters:
+        - name: Authorization
+          in: header
+          description: JWT认证令牌
+          required: true
+          schema:
+            type: string
+        - name: interview_id
+          in: path
+          required: true
+          description: 面试ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  interview:
+                    type: object
+                    properties:
+                      id:
+                        type: integer
+                        example: 1
+                      questions:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            question:
+                              type: string
+                              example: "什么是RESTful API？"
+                            answer:
+                              type: string
+                              example: "用户的回答..."
+                            ai_analysis:
+                              type: string
+                              example: "回答分析..."
+                      created_at:
+                        type: string
+                        format: date-time
+        '404':
+          description: 面试不存在
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "面试记录不存在"
+
+  /webrtc/test/:
+    get:
+      summary: WebSocket测试页面
+      deprecated: false
+      description: 返回WebSocket测试用的HTML页面
+      tags:
+        - WebRTC
+      responses:
+        '200':
+          description: 成功返回HTML页面
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /webrtc/audio-test/:
+    get:
+      summary: 音频WebSocket测试页面
+      deprecated: false
+      description: 返回音频WebSocket测试用的HTML页面
+      tags:
+        - WebRTC
+      responses:
+        '200':
+          description: 成功返回HTML页面
+          content:
+            text/html:
+              schema:
+                type: string
 
 components:
   schemas: {}
