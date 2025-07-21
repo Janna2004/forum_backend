@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>WebRTC 音视频+实时转写测试</title>
+    <title>WebRTC 多简历面试测试</title>
     <style>
         #video {
             width: 480px;
@@ -22,16 +22,74 @@
             color: #1976d2;
             margin: 10px 0;
         }
+        .step-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .step-title {
+            color: #1976d2;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .resume-item {
+            margin: 5px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            cursor: pointer;
+            background: white;
+            transition: all 0.2s;
+        }
+        .resume-item:hover {
+            background: #f0f8ff;
+            border-color: #1976d2;
+        }
+        .resume-item.selected {
+            border: 2px solid #1976d2 !important;
+            background: #e3f2fd !important;
+        }
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        button:not(:disabled) {
+            background: #1976d2;
+            color: white;
+        }
+        button:not(:disabled):hover {
+            background: #1565c0;
+        }
     </style>
 </head>
 <body>
-    <h2>WebRTC 音视频+实时转写测试</h2>
+    <h2>WebRTC 多简历面试测试</h2>
     <div class="status">面试ID: <span id="interviewId">未创建</span></div>
+    <div class="status">选择的简历: <span id="selectedResume">未选择</span></div>
+    
+    <!-- 简历选择区域 -->
+    <div class="step-section">
+        <div class="step-title">第一步：选择简历</div>
+        <button id="loadResumesBtn">加载我的简历</button>
+        <div id="resumeList" style="margin-top: 10px;"></div>
+    </div>
+    
     <video id="video" autoplay playsinline></video>
     <div id="current-question" style="margin-top:20px;font-weight:bold;color:#1976d2;">当前问题：无</div>
     <div id="transcript">转写内容将实时显示在这里...</div>
-    <button id="createInterviewBtn">创建面试</button>
-    <button id="startBtn" disabled>开始采集</button>
+    
+    <button id="createInterviewBtn" disabled>第二步：创建面试</button>
+    <button id="startBtn" disabled>第三步：开始采集</button>
     <button id="stopBtn" disabled>停止采集</button>
     <button id="finishBtn" disabled>说完了</button>
 
@@ -45,6 +103,7 @@
         let videoFrameTimer = null;
         let canStream = false;
         let currentInterviewId = null;
+        let selectedResumeId = null;
 
         const video = document.getElementById('video');
         const transcriptDiv = document.getElementById('transcript');
@@ -54,6 +113,9 @@
         const finishBtn = document.getElementById('finishBtn');
         const questionDiv = document.getElementById('current-question');
         const interviewIdSpan = document.getElementById('interviewId');
+        const loadResumesBtn = document.getElementById('loadResumesBtn');
+        const resumeListDiv = document.getElementById('resumeList');
+        const selectedResumeSpan = document.getElementById('selectedResume');
 
         // 新增：JWT登录逻辑
         async function loginAndGetToken() {
@@ -75,8 +137,86 @@
             }
         }
 
+        // 新增：加载简历列表
+        async function loadResumeList() {
+            const token = await loginAndGetToken();
+            if (!token) return;
+
+            try {
+                const resp = await fetch('/users/resume/list/', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!resp.ok) {
+                    alert('获取简历列表失败');
+                    return;
+                }
+
+                const data = await resp.json();
+                console.log('简历列表响应:', data);
+
+                if (data.success && data.resumes && data.resumes.length > 0) {
+                    displayResumeList(data.resumes);
+                } else {
+                    resumeListDiv.innerHTML = '<p style="color: orange;">您还没有创建任何简历，请先到个人中心创建简历</p>';
+                }
+            } catch (e) {
+                alert('获取简历列表请求异常: ' + e.message);
+            }
+        }
+
+        // 显示简历列表
+        function displayResumeList(resumes) {
+            resumeListDiv.innerHTML = '';
+            resumes.forEach(resume => {
+                const resumeItem = document.createElement('div');
+                resumeItem.className = 'resume-item';
+                
+                const completedText = resume.completed ? '✅ 已完成' : '⚠️ 未完成';
+                const completedColor = resume.completed ? 'green' : 'orange';
+                
+                resumeItem.innerHTML = `
+                    <strong>${resume.resume_name}</strong><br>
+                    <span style="color: #666;">期望职位: ${resume.expected_position}</span><br>
+                    <span style="color: ${completedColor}; font-size: 0.9em;">${completedText}</span><br>
+                    <span style="color: #999; font-size: 0.8em;">更新时间: ${new Date(resume.updated_at).toLocaleString()}</span>
+                `;
+                
+                resumeItem.onclick = () => selectResume(resume, resumeItem);
+                resumeListDiv.appendChild(resumeItem);
+            });
+        }
+
+        // 选择简历
+        function selectResume(resume, clickedItem) {
+            selectedResumeId = resume.resume_id;
+            selectedResumeSpan.textContent = `${resume.resume_name} (${resume.expected_position})`;
+            
+            // 高亮选中的简历
+            const allItems = resumeListDiv.querySelectorAll('.resume-item');
+            allItems.forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            clickedItem.classList.add('selected');
+            
+            // 启用创建面试按钮
+            createInterviewBtn.disabled = false;
+        }
+
+        // 加载简历列表按钮事件
+        loadResumesBtn.onclick = loadResumeList;
+
         // 新增：创建面试
         createInterviewBtn.onclick = async function() {
+            if (!selectedResumeId) {
+                alert('请先选择一份简历');
+                return;
+            }
+
             const token = await loginAndGetToken();
             if (!token) return;
 
@@ -120,6 +260,10 @@
                 alert('请先创建面试');
                 return;
             }
+            if (!selectedResumeId) {
+                alert('请先选择简历');
+                return;
+            }
 
             startBtn.disabled = true;
             stopBtn.disabled = false;
@@ -153,13 +297,14 @@
             let ws_url = ws_scheme + '://' + window.location.host + '/ws/webrtc/?token=' + token;
             ws = new WebSocket(ws_url);
             ws.onopen = () => {
-                console.log('WebSocket已连接，发送创建流请求，面试ID:', currentInterviewId);  // 添加调试日志
-                // 先发送创建/加入流请求，带上面试ID
+                console.log('WebSocket已连接，发送创建流请求，面试ID:', currentInterviewId, '简历ID:', selectedResumeId);  // 添加调试日志
+                // 先发送创建/加入流请求，带上面试ID和简历ID
                 ws.send(JSON.stringify({
                     type: 'create_stream',
                     title: '测试流',
                     description: 'WebRTC测试',
-                    interview_id: currentInterviewId
+                    interview_id: currentInterviewId,
+                    resume_id: selectedResumeId
                 }));
             };
             ws.onmessage = (event) => {
@@ -363,6 +508,13 @@
             stopVideoFrameSending();
             transcriptDiv.textContent = "已停止采集";
             questionDiv.textContent = "当前问题：无";
+            
+            // 重置状态，允许重新开始
+            createInterviewBtn.disabled = selectedResumeId ? false : true;
+            currentInterviewId = null;
+            interviewIdSpan.textContent = "未创建";
+            canStream = false;
+            isRecording = false;
         };
     </script>
 </body>

@@ -8,7 +8,40 @@
 
 ## 1. 面试流程
 
-### 1.1 创建面试
+### 1.1 获取用户简历列表
+
+在创建面试前，需要先获取用户的简历列表，让用户选择使用哪份简历进行面试：
+
+```http
+GET /users/resume/list/
+Authorization: Bearer <token>
+```
+
+响应：
+```json
+{
+    "success": true,
+    "resumes": [
+        {
+            "resume_id": 1,
+            "resume_name": "后端开发简历",
+            "expected_position": "后端工程师",
+            "updated_at": "2024-01-01T12:00:00Z",
+            "completed": true
+        },
+        {
+            "resume_id": 2,
+            "resume_name": "全栈开发简历",
+            "expected_position": "全栈工程师", 
+            "updated_at": "2024-01-02T10:30:00Z",
+            "completed": false
+        }
+    ],
+    "total": 2
+}
+```
+
+### 1.2 创建面试
 
 在建立 WebSocket 连接前，需要先创建面试：
 
@@ -39,7 +72,7 @@ Content-Type: application/json
 }
 ```
 
-### 1.2 WebSocket 连接信息
+### 1.3 WebSocket 连接信息
 
 - **地址**：`ws://<服务器地址>:8000/ws/webrtc/`
   - 本地开发示例：`ws://localhost:8000/ws/webrtc/`
@@ -59,7 +92,8 @@ Content-Type: application/json
   "type": "create_stream",
   "title": "面试视频流",
   "description": "实时面试",
-  "interview_id": "123"  // 必填，从创建面试接口获得的ID
+  "interview_id": "123",  // 必填，从创建面试接口获得的ID
+  "resume_id": "1"        // 必填，用户选择的简历ID
 }
 ```
 
@@ -181,30 +215,34 @@ canvas.toBlob(blob => {
 
 ## 3. 典型消息流程
 
-1. 前端调用 `/interviews/create/` 创建面试，获取面试ID。
-2. 前端连接 WebSocket，收到 `connection_established`。
-3. 前端发送 `create_stream` 消息（带上面试ID），收到 `stream_created` 响应。
-4. 收到 `interview_message`（phase: intro, text: "请开始自我介绍吧"），前端自动开启语音识别。
-5. 用户自我介绍，前端持续推送 `audio_frame` 和 `video_frame`，后端持续推送 `asr_result`。
-6. 15秒无语音或识别到"说完了"，后端推送 `interview_message`（phase: question, text: "自我介绍结束，下面开始问问题。"），紧接着推送第一个问题。
-7. 问题阶段循环，直到问题队列为空，后端推送 `interview_message`（phase: code, text: "问答环节结束，下面进入代码题环节。"）。
-8. 代码题阶段（后端可继续推送相关消息，暂未实现）。
+1. 前端调用 `/users/resume/list/` 获取用户简历列表，让用户选择使用的简历。
+2. 前端调用 `/interviews/create/` 创建面试，获取面试ID。
+3. 前端连接 WebSocket，收到 `connection_established`。
+4. 前端发送 `create_stream` 消息（带上面试ID和简历ID），收到 `stream_created` 响应。
+5. 收到 `interview_message`（phase: intro, text: "请开始自我介绍吧"），前端自动开启语音识别。
+6. 用户自我介绍，前端持续推送 `audio_frame` 和 `video_frame`，后端持续推送 `asr_result`。
+7. 15秒无语音或识别到"说完了"，后端推送 `interview_message`（phase: question, text: "自我介绍结束，下面开始问问题。"），紧接着推送第一个问题。
+8. 问题阶段循环，直到问题队列为空，后端推送 `interview_message`（phase: code, text: "问答环节结束，下面进入代码题环节。"）。
+9. 代码题阶段（后端可继续推送相关消息，暂未实现）。
 
 ---
 
 ## 4. 前端对接建议
 
-1. **创建面试**：
+1. **获取简历列表**：
+   - 调用 `/users/resume/list/` 接口获取用户的所有简历
+   - 让用户选择使用哪份简历进行面试
+2. **创建面试**：
    - 调用 `/interviews/create/` 接口创建面试
    - 保存返回的面试ID，后续WebSocket连接需要用到
-2. **WebSocket连接**：
+3. **WebSocket连接**：
    - 连接时在URL中带上token参数
-   - 连接成功后发送 `create_stream` 消息，必须带上面试ID
-3. **面试流程**：
+   - 连接成功后发送 `create_stream` 消息，必须带上面试ID和简历ID
+4. **面试流程**：
    - 监听 `interview_message`，根据 `phase` 字段切换UI和控制语音识别
    - 实时显示 `asr_result` 中的转写内容
    - 每40ms推送一帧音频，每1秒推送一帧视频
-4. **错误处理**：
+5. **错误处理**：
    - 监听 `error` 和 `cheat_detected` 消息
    - 实现断线重连机制
 
@@ -218,7 +256,8 @@ canvas.toBlob(blob => {
 4. 视频帧建议为480x360或640x480 JPEG，base64编码。
 5. 生产环境使用HTTPS和WSS协议。
 6. 问题队列、面试阶段等由后端自动控制，前端只需根据ws消息切换UI和控制语音识别。
-7. 创建面试时的position_type必须是以下之一：
+7. **多简历支持**：用户可以创建多份简历，面试时必须选择使用的简历ID传递给后端，后端会根据选择的简历生成个性化面试问题。
+8. 创建面试时的position_type必须是以下之一：
    - backend：后端开发
    - frontend：前端开发
    - pm：产品经理

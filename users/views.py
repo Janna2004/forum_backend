@@ -235,12 +235,10 @@ def get_resume(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_or_update_resume(request):
     """创建或更新简历"""
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
@@ -252,29 +250,35 @@ def create_or_update_resume(request):
                 resume = Resume.objects.get(id=resume_id, user=user)
                 created = False
             except Resume.DoesNotExist:
-                return JsonResponse({'error': '简历不存在'}, status=404)
+                return JsonResponse({'error': '要更新的简历不存在'}, status=404)
         else:
             # 创建新简历
+            if not data.get('resume_name'):
+                return JsonResponse({'error': '创建简历时resume_name为必填项'}, status=400)
             resume = Resume(user=user)
             created = True
         
         # 更新简历字段
-        if 'resume_name' in data:
-            resume.resume_name = data['resume_name']
-        if 'name' in data:
-            resume.name = data['name']
-        if 'age' in data:
-            resume.age = data['age']
-        if 'graduation_date' in data:
-            resume.graduation_date = data['graduation_date']
-        if 'education_level' in data:
-            resume.education_level = data['education_level']
-        if 'expected_position' in data:
-            resume.expected_position = data['expected_position']
-        if 'completed' in data:
-            resume.completed = data['completed']
+        fields = [
+            ('resume_name', '简历名称'),
+            ('name', '姓名'),
+            ('age', '年龄'),
+            ('graduation_date', '毕业时间'),
+            ('education_level', '学历'),
+            ('expected_position', '期望职位'),
+            ('completed', '完成状态')
+        ]
         
-        resume.save()
+        for field, field_name in fields:
+            if field in data:
+                setattr(resume, field, data[field])
+        
+        try:
+            resume.save()
+        except Exception as e:
+            if 'unique constraint' in str(e).lower():
+                return JsonResponse({'error': f'已存在同名简历：{data.get("resume_name")}'}, status=400)
+            raise
         
         return JsonResponse({
             'success': True,
@@ -285,12 +289,10 @@ def create_or_update_resume(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def manage_work_experience(request):
     """管理工作经历：创建（不传id）或更新（传id）"""
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
@@ -326,12 +328,10 @@ def manage_work_experience(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def manage_project_experience(request):
     """管理项目经历：创建（不传id）或更新（传id）"""
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
@@ -366,12 +366,10 @@ def manage_project_experience(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def manage_education_experience(request):
     """管理教育经历：创建（不传id）或更新（传id）"""
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
@@ -406,12 +404,10 @@ def manage_education_experience(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
+@api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def manage_custom_section(request):
     """管理自定义部分：创建（不传id）或更新（传id）"""
-    if request.method != 'POST':
-        return JsonResponse({'error': '仅支持POST请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
@@ -442,12 +438,10 @@ def manage_custom_section(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
+@api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_work_experience(request):
     """删除工作经历"""
-    if request.method != 'DELETE':
-        return JsonResponse({'error': '仅支持DELETE请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
@@ -471,12 +465,10 @@ def delete_work_experience(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
+@api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_project_experience(request):
     """删除项目经历"""
-    if request.method != 'DELETE':
-        return JsonResponse({'error': '仅支持DELETE请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
@@ -500,12 +492,10 @@ def delete_project_experience(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
+@api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_education_experience(request):
     """删除教育经历"""
-    if request.method != 'DELETE':
-        return JsonResponse({'error': '仅支持DELETE请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
@@ -529,12 +519,10 @@ def delete_education_experience(request):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
+@api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_custom_section(request):
     """删除自定义部分"""
-    if request.method != 'DELETE':
-        return JsonResponse({'error': '仅支持DELETE请求'}, status=405)
     try:
         user = request.user
         data = json.loads(request.body.decode())
