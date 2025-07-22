@@ -10,7 +10,7 @@ import uuid
 import base64
 from knowledge_base.services import KnowledgeBaseService
 from users.models import Resume
-from knowledge_base.models import JobPosition
+from positions.models import NowCoderPosition
 import threading
 import cv2
 import numpy as np
@@ -292,7 +292,7 @@ class InterviewConsumer(AsyncWebsocketConsumer):
     async def init_question_queue(self):
         """初始化面试问题队列（实际应根据岗位/简历信息调用知识库服务）"""
         # TODO: 这里用测试数据，实际应从前端传岗位/简历id后调用KnowledgeBaseService
-        # 示例：job_position = JobPosition.objects.get(id=xxx)
+        # 示例：nowcoder_position = NowCoderPosition.objects.get(id=xxx)
         #      resume = Resume.objects.get(id=xxx)
         #      questions = KnowledgeBaseService().search_relevant_questions(job_position, resume, limit=5)
         #      return [q['question'] for q in questions]

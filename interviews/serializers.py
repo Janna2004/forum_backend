@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Interview
-from knowledge_base.models import JobPosition
+from positions.models import NowCoderPosition
 from users.models import Resume
 import requests
 import json
@@ -29,8 +29,8 @@ class InterviewCreateSerializer(serializers.ModelSerializer):
     def validate_job_position_id(self, value):
         if value:
             try:
-                JobPosition.objects.get(id=value)
-            except JobPosition.DoesNotExist:
+                NowCoderPosition.objects.get(id=value)
+            except NowCoderPosition.DoesNotExist:
                 raise serializers.ValidationError("指定的岗位不存在")
         return value
 
@@ -81,16 +81,16 @@ class InterviewCreateSerializer(serializers.ModelSerializer):
         resume = Resume.objects.get(id=resume_id, user=user)
         validated_data['resume'] = resume
         
-        # 如果提供了job_position_id，从数据库获取相关信息
+        # 如果提供了job_position_id，从nowcoder_data表获取相关信息
         if job_position_id:
-            job_position = JobPosition.objects.get(id=job_position_id)
-            validated_data['job_position'] = job_position
-            # 如果没有提供某些字段，则使用job_position中的信息
-            validated_data.setdefault('position_name', job_position.name)
-            validated_data.setdefault('company_name', job_position.company_name)
-            validated_data.setdefault('position_description', job_position.description)
-            validated_data.setdefault('position_requirements', job_position.requirements)
-            validated_data.setdefault('position_type', job_position.position_type)
+            nowcoder_position = NowCoderPosition.objects.get(id=job_position_id)
+            validated_data['nowcoder_position_id'] = job_position_id  # 存储ID而不是对象
+            # 如果没有提供某些字段，则使用nowcoder_position中的信息
+            validated_data.setdefault('position_name', nowcoder_position.job_name)
+            validated_data.setdefault('company_name', nowcoder_position.company)
+            validated_data.setdefault('position_description', nowcoder_position.introduction or nowcoder_position.job_name)
+            validated_data.setdefault('position_requirements', nowcoder_position.job_request or '')
+            validated_data.setdefault('position_type', nowcoder_position.position_type)
         
         # 设置用户
         validated_data['user'] = user
@@ -126,7 +126,7 @@ class InterviewListSerializer(serializers.ModelSerializer):
             'question_count',  # 添加问题数量字段
             'created_at',
             'updated_at',
-        ]
+        ] 
     
     def get_question_count(self, obj):
         """获取问题数量"""

@@ -12,7 +12,6 @@ import uuid
 import base64
 from knowledge_base.services import KnowledgeBaseService
 from users.models import Resume
-from knowledge_base.models import JobPosition
 import threading
 import cv2
 import numpy as np

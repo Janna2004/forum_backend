@@ -1,11 +1,19 @@
 from django.db import models
 from users.models import User
-from knowledge_base.models import JobPosition
+from positions.models import NowCoderPosition
 import uuid
 
 class Interview(models.Model):
     """面试模型"""
-    POSITION_TYPE_CHOICES = JobPosition.POSITION_TYPE_CHOICES
+    POSITION_TYPE_CHOICES = [
+        ('backend', '后端开发'),
+        ('frontend', '前端开发'),
+        ('pm', '产品经理'),
+        ('qa', '测试'),
+        ('algo', '算法'),
+        ('data', '数据'),
+        ('other', '其他'),
+    ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='interviews', verbose_name='用户')
     
@@ -24,13 +32,11 @@ class Interview(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
     
-    # 岗位相关信息
-    job_position = models.ForeignKey(
-        JobPosition, 
-        on_delete=models.SET_NULL, 
+    # 岗位相关信息 - 使用IntegerField存储nowcoder_data的ID，避免外键约束问题
+    nowcoder_position_id = models.IntegerField(
         null=True, 
         blank=True, 
-        verbose_name='关联岗位'
+        verbose_name='牛客网岗位ID'
     )
     position_name = models.CharField(max_length=100, verbose_name='岗位名称')
     company_name = models.CharField(max_length=100, blank=True, verbose_name='公司名称')
@@ -55,6 +61,21 @@ class Interview(models.Model):
         verbose_name = '面试'
         verbose_name_plural = '面试'
         ordering = ['-interview_time']
+
+    @property
+    def nowcoder_position(self):
+        """获取关联的牛客网岗位对象"""
+        if self.nowcoder_position_id:
+            try:
+                return NowCoderPosition.objects.get(id=self.nowcoder_position_id)
+            except NowCoderPosition.DoesNotExist:
+                return None
+        return None
+    
+    @property
+    def job_position(self):
+        """兼容性属性，返回nowcoder_position"""
+        return self.nowcoder_position
 
 class InterviewAnswer(models.Model):
     """面试答题记录"""
