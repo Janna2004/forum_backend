@@ -88,7 +88,8 @@ def get_user_profile(request):
             'phone': user.phone,
             'avatar': user.avatar,
             'date_joined': user.date_joined,
-            'last_login': user.last_login
+            'last_login': user.last_login,
+            'target_position': user.target_position  # 添加目标岗位信息
         }
         
         # 获取简历信息（支持多简历）
@@ -132,6 +133,17 @@ def update_user_profile(request):
             user.phone = data['phone']
         if 'avatar' in data:
             user.avatar = data['avatar']
+            
+        # 更新目标岗位信息
+        target_position = data.get('target_position')
+        if target_position:
+            user.target_position_id = target_position.get('job_position_id')
+            user.target_position_name = target_position.get('position_name')
+            user.target_company_name = target_position.get('company_name')
+            expected_salary = target_position.get('expected_salary')
+            if expected_salary and len(expected_salary) == 2:
+                user.target_salary_min = expected_salary[0]
+                user.target_salary_max = expected_salary[1]
         
         user.save()
         

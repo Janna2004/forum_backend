@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.contrib.postgres.fields import ArrayField
 
 # Create your models here.
 
@@ -9,9 +10,29 @@ class User(AbstractUser):
     phone = models.CharField(max_length=20, blank=True, null=True, verbose_name='手机号')
     avatar = models.URLField(blank=True, null=True, verbose_name='头像')
     
+    # 目标岗位信息
+    target_position_id = models.IntegerField(blank=True, null=True, verbose_name='目标岗位ID')
+    target_position_name = models.CharField(max_length=100, blank=True, null=True, verbose_name='目标岗位名称')
+    target_company_name = models.CharField(max_length=100, blank=True, null=True, verbose_name='目标公司名称')
+    target_salary_min = models.IntegerField(blank=True, null=True, verbose_name='期望最低薪资(k)')
+    target_salary_max = models.IntegerField(blank=True, null=True, verbose_name='期望最高薪资(k)')
+    
     class Meta:
         verbose_name = '用户'
         verbose_name_plural = '用户'
+        
+    @property
+    def target_position(self):
+        """获取目标岗位信息"""
+        if not self.target_position_id:
+            return None
+            
+        return {
+            'job_position_id': self.target_position_id,
+            'position_name': self.target_position_name,
+            'company_name': self.target_company_name,
+            'expected_salary': [self.target_salary_min, self.target_salary_max] if self.target_salary_min and self.target_salary_max else None
+        }
 
 class Resume(models.Model):
     """简历模型"""
