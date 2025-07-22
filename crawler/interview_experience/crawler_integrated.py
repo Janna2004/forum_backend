@@ -12,8 +12,9 @@ import django
 from pathlib import Path
 
 # 添加项目根目录到Python路径
-project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.append(str(project_root))
+project_root = str(Path(__file__).resolve().parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # 设置Django设置模块
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
