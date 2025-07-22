@@ -167,7 +167,7 @@
                 const resp = await fetch('/users/login/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username: 'testuser1', password: 'password123'})
+                    body: JSON.stringify({username: 'testuser', password: 'password123'})
                 });
                 if (!resp.ok) {
                     alert('登录失败');

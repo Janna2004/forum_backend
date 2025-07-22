@@ -27,3 +27,7 @@ djangorestframework-simplejwt>=5.5.0
 celery>=5.5.3
 pymysql>=1.1.1
 transformers>=4.53.2
+bs4>=0.0.2
+config>=0.5.1
+django-filter>=25.1
+psycopg2-binary>=2.9.10

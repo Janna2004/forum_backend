@@ -661,16 +661,16 @@ class CodingProblemService:
             return 'medium'
         
         # 简单的经验值判断逻辑
-        work_experience_count = getattr(resume, 'work_experiences', [])
-        project_count = getattr(resume, 'project_experiences', [])
-        if hasattr(work_experience_count, 'count'):
-            work_experience_count = work_experience_count.count()
-        else:
-            work_experience_count = len(work_experience_count) if work_experience_count else 0
-        if hasattr(project_count, 'count'):
-            project_count = project_count.count()
-        else:
-            project_count = len(project_count) if project_count else 0
+        work_experience_count = 0
+        project_count = 0
+        
+        if resume:
+            try:
+                work_experience_count = resume.work_experiences.count()
+                project_count = resume.project_experiences.count()
+            except Exception:
+                work_experience_count = 0
+                project_count = 0
         
         total_experience = work_experience_count + project_count
         
@@ -720,11 +720,14 @@ class CodingProblemService:
         score += tag_matches * 10
         
         # 公司匹配分数（如果简历中有相关工作经验）
-        if resume and hasattr(resume, 'work_experiences'):
-            for work_exp in resume.work_experiences.all():
-                if work_exp.company_name and problem.companies:
-                    if work_exp.company_name in problem.companies:
-                        score += 20
+        if resume:
+            try:
+                for work_exp in resume.work_experiences.all():
+                    if work_exp.company_name and problem.companies:
+                        if work_exp.company_name in problem.companies:
+                            score += 20
+            except Exception:
+                pass
         
         # 随机因子，增加多样性
         import random

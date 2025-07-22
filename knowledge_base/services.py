@@ -5,6 +5,7 @@ import base64
 import hashlib
 import websocket
 import threading
+import re
 from datetime import datetime
 from urllib.parse import urlencode
 from typing import List, Dict, Any
@@ -200,6 +201,281 @@ class KnowledgeBaseService:
     
     def __init__(self):
         self.spark_service = XunfeiSparkService()
+    
+    def generate_interview_questions(self, prompt: str) -> str:
+        """根据提示词生成面试问题"""
+        try:
+            # 从提示词中提取关键信息
+            import re
+            position_match = re.search(r'应聘岗位：(.*?)\n', prompt)
+            position_type_match = re.search(r'岗位类型：(.*?)\n', prompt)
+            skills_match = re.search(r'技能特长：(.*?)\n', prompt)
+            projects_match = re.search(r'项目经验：(.*?)\n', prompt)
+            
+            position = position_match.group(1) if position_match else ''
+            position_type = position_type_match.group(1) if position_type_match else ''
+            skills = skills_match.group(1) if skills_match else ''
+            projects = projects_match.group(1) if projects_match else ''
+            
+            print(f"[调试] 提取的信息 - 岗位: {position}, 类型: {position_type}, 技能: {skills}")
+            
+            # 先尝试使用基于规则的问题生成，避免API调用
+            rule_based_questions = self._generate_rule_based_questions(
+                position, position_type, skills, projects
+            )
+            
+            if rule_based_questions:
+                print(f"[调试] 使用基于规则的问题生成，共{len(rule_based_questions)}个问题")
+                return '\n'.join([f"{i+1}. {q}" for i, q in enumerate(rule_based_questions)])
+            
+            # 如果规则生成失败，再尝试API调用（设置超时）
+            print("[调试] 尝试调用AI服务生成问题")
+            
+            # 构建简化的提示词
+            simple_prompt = f"""请为{position_type}岗位生成8个面试问题，要求简洁专业：
+
+岗位：{position}
+技能：{skills}
+
+请直接列出问题，每行一个："""
+            
+            # 设置超时调用AI服务（使用线程超时）
+            import threading
+            result = {"response": None, "error": None}
+            
+            def call_ai_service():
+                try:
+                    result["response"] = self.spark_service._send_message(simple_prompt)
+                except Exception as e:
+                    result["error"] = str(e)
+            
+            thread = threading.Thread(target=call_ai_service)
+            thread.start()
+            thread.join(timeout=5)  # 5秒超时
+            
+            if thread.is_alive():
+                print("[调试] AI服务调用超时")
+                return ""
+            elif result["error"]:
+                print(f"[调试] AI服务调用失败: {result['error']}")
+                return ""
+            elif result["response"]:
+                print(f"[调试] AI服务返回: {result['response'][:100]}...")
+                return result["response"]
+            else:
+                print("[调试] AI服务返回空结果")
+                return ""
+            
+        except Exception as e:
+            print(f"[调试] 生成面试问题时出错: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return ""
+    
+    def _generate_rule_based_questions(self, position, position_type, skills, projects):
+        """基于规则生成问题，不依赖API"""
+        try:
+            questions = []
+            
+            # 基础问题
+            questions.append("请简单介绍一下你的技术背景和主要技能。")
+            
+            # 根据岗位类型生成专业问题
+            if position_type == 'backend':
+                questions.extend([
+                    "你在后端开发中使用过哪些技术栈？请重点介绍你最熟悉的框架。",
+                    "请描述一下你是如何设计和优化数据库的？",
+                    "在处理高并发场景时，你有哪些经验和解决方案？",
+                    "请介绍一下你对微服务架构的理解和实践。"
+                ])
+            elif position_type == 'frontend':
+                questions.extend([
+                    "你熟悉哪些前端框架？请介绍你最擅长的技术栈。",
+                    "你是如何进行前端性能优化的？有哪些具体的方法？",
+                    "请介绍你在响应式设计方面的经验。",
+                    "你如何处理前端的状态管理和数据流？"
+                ])
+            elif position_type == 'algo':
+                questions.extend([
+                    "请介绍你最熟悉的机器学习算法和应用场景。",
+                    "你在处理大规模数据时有哪些经验？",
+                    "请描述一个你参与的算法优化项目。",
+                    "你如何评估和选择合适的算法模型？"
+                ])
+            elif position_type == 'pm':
+                questions.extend([
+                    "请介绍你的产品管理经验和方法论。",
+                    "你是如何进行用户需求分析和产品规划的？",
+                    "请描述一个你主导的产品项目从0到1的过程。",
+                    "你如何平衡技术实现和用户需求？"
+                ])
+            else:
+                # 通用技术问题
+                questions.extend([
+                    "请介绍你最近参与的一个技术项目。",
+                    "你在团队协作中通常担任什么角色？",
+                    "遇到技术难题时，你的解决思路是什么？",
+                    "你如何保持技术学习和自我提升？"
+                ])
+            
+            # 根据技能信息添加针对性问题
+            if skills and skills != "未提供":
+                if any(skill in skills.lower() for skill in ['java', 'spring']):
+                    questions.append("请介绍你在Java/Spring开发中的经验和遇到的挑战。")
+                if any(skill in skills.lower() for skill in ['python', 'django']):
+                    questions.append("请分享你在Python/Django开发中的实践经验。")
+                if any(skill in skills.lower() for skill in ['react', 'vue', 'javascript']):
+                    questions.append("请介绍你在前端框架开发中的经验和最佳实践。")
+            
+            # 根据项目经验添加问题
+            if projects and projects != "未提供":
+                questions.append("请详细介绍你参与过的最有挑战性的项目。")
+                if "电商" in projects or "支付" in projects:
+                    questions.append("在电商或支付项目中，你是如何保证系统的稳定性和安全性的？")
+            
+            # 结尾问题
+            questions.extend([
+                "你对我们公司和这个岗位有什么了解？",
+                "你对未来的职业规划是什么？"
+            ])
+            
+            # 返回前8个问题
+            return questions[:8]
+            
+        except Exception as e:
+            print(f"[调试] 基于规则生成问题失败: {e}")
+            return []
+    
+    def _search_interview_posts(self, position: str, position_type: str, skills: str, limit: int = 10) -> list:
+        """从帖子中搜索相关面经"""
+        try:
+            from posts.models import Post, Tag
+            from django.db.models import Q
+            
+            # 构建标签查询条件
+            tag_conditions = Q()
+            
+            # 添加岗位类型标签
+            position_type_keywords = {
+                'backend': ['后端', 'java', 'python', 'go', '服务端'],
+                'frontend': ['前端', 'web', 'javascript', 'vue', 'react'],
+                'algo': ['算法', '机器学习', '深度学习', 'AI'],
+                'data': ['数据', '分析师', '数据挖掘'],
+                'pm': ['产品经理', '产品', 'PM'],
+                'qa': ['测试', 'QA', '质量']
+            }
+            
+            if position_type in position_type_keywords:
+                for keyword in position_type_keywords[position_type]:
+                    tag_conditions |= Q(tags__name__icontains=keyword)
+            
+            # 添加职位标签
+            if position:
+                tag_conditions |= Q(tags__name__icontains=position)
+            
+            # 添加技能标签
+            if skills:
+                for skill in skills.split('，'):  # 处理中文逗号分隔的技能列表
+                    skill = skill.strip()
+                    if skill:
+                        tag_conditions |= Q(tags__name__icontains=skill)
+            
+            # 搜索帖子
+            posts = Post.objects.filter(
+                tag_conditions,
+                tags__tag_type__in=['company', 'position', 'skill']  # 只搜索公司、岗位、技能相关的标签
+            ).distinct()
+            
+            # 构建内容搜索条件
+            content_conditions = Q()
+            
+            # 添加面试相关关键词
+            interview_keywords = ['面试', '面经', '八股文', '技术问题', '考察', '考点']
+            for keyword in interview_keywords:
+                content_conditions |= Q(title__icontains=keyword) | Q(content__icontains=keyword)
+            
+            posts = posts.filter(content_conditions)
+            
+            # 按相关度排序（标签匹配数量）并限制返回数量
+            posts = posts.order_by('-likes_count', '-created_at')[:limit]
+            
+            # 处理结果
+            results = []
+            for post in posts:
+                # 获取公司和岗位标签
+                company_tags = [tag.name for tag in post.tags.filter(tag_type='company')]
+                position_tags = [tag.name for tag in post.tags.filter(tag_type='position')]
+                
+                results.append({
+                    'title': post.title,
+                    'content': post.content,
+                    'company': company_tags[0] if company_tags else '',
+                    'position': position_tags[0] if position_tags else '',
+                    'likes': post.likes_count
+                })
+            
+            return results
+            
+        except Exception as e:
+            print(f"搜索面经帖子时出错: {e}")
+            return []
+    
+    def _format_interview_posts(self, posts: list) -> str:
+        """格式化面经帖子内容"""
+        if not posts:
+            return "暂无相关面经"
+            
+        formatted = []
+        for post in posts:
+            # 提取标题和内容中的问题
+            content = post['content']
+            questions = self._extract_questions(content)
+            
+            # 添加帖子来源信息
+            source = []
+            if post['company']:
+                source.append(post['company'])
+            if post['position']:
+                source.append(post['position'])
+            source_str = f"【{'·'.join(source)}】" if source else ""
+            
+            # 格式化问题
+            if questions:
+                formatted.extend([f"{source_str}{q}" for q in questions])
+            
+        return "\n".join(formatted)
+    
+    def _extract_questions(self, text: str) -> list:
+        """从文本中提取问题"""
+        import re  # 在方法中导入re模块
+        questions = []
+        
+        # 常见的问题标记模式
+        patterns = [
+            r'问：(.*?)(?=\n|$)',
+            r'Q：(.*?)(?=\n|$)',
+            r'Q:(.*?)(?=\n|$)',
+            r'\d+[.、](.*?)(?=\n|$)',
+            r'面试官：(.*?)(?=\n|$)',
+            r'面试问题：(.*?)(?=\n|$)',
+        ]
+        
+        for pattern in patterns:
+            matches = re.finditer(pattern, text, re.MULTILINE)
+            for match in matches:
+                question = match.group(1).strip()
+                if question and len(question) > 5:  # 过滤太短的问题
+                    questions.append(question)
+        
+        # 如果没有找到明确的问题格式，尝试按段落拆分并识别问题语句
+        if not questions:
+            paragraphs = text.split('\n')
+            for p in paragraphs:
+                p = p.strip()
+                if p and ('?' in p or '？' in p) and len(p) > 10:
+                    questions.append(p)
+        
+        return questions[:10]  # 限制返回的问题数量
     
     def search_relevant_questions(self, position_type, resume, limit=5):
         """

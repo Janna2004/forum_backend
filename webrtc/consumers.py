@@ -31,6 +31,7 @@ import numpy as np
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 from openai import OpenAI
 import traceback
+import re
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         self.last_asr_text = ''
         self._ws_loop = None
         self.current_question = None
+        self.current_question_knowledge_points = []  # 当前问题的知识点
         self.current_answer_sentences = []
         self.current_answer_final = []
         self.current_answer_start_time = None
@@ -79,29 +81,37 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 print('[RTASR回调]', text)
                 asyncio.run_coroutine_threadsafe(self.handle_asr_result(text), loop)
             def start_rtasr():
-                try:
-                    print("[WebRTCConsumer] RTASR ws connecting...")
-                    self.rtasr_client = XunfeiRTASRClient(app_id='08425c8a', api_key='c64481ae5aac8c1ad9993125c7a6fdbc', on_result=on_rtasr_result)
-                    self.rtasr_client.connect()
-                    print("[WebRTCConsumer] RTASR ws connected")
-                except Exception as e:
-                    print(f"[WebRTCConsumer] RTASR ws connect error: {e}")
-                    asyncio.run_coroutine_threadsafe(
-                        self.send(text_data=json.dumps({'type': 'asr_result', 'text': f'[RTASR连接失败] {e}'})), loop)
+                retry_count = 0
+                max_retries = 3
+                while retry_count < max_retries:
+                    try:
+                        print(f"[WebRTCConsumer] RTASR ws connecting... (尝试 {retry_count + 1}/{max_retries})")
+                        self.rtasr_client = XunfeiRTASRClient(app_id='08425c8a', api_key='c64481ae5aac8c1ad9993125c7a6fdbc', on_result=on_rtasr_result)
+                        self.rtasr_client.connect()
+                        print("[WebRTCConsumer] RTASR ws connected")
+                        # 连接成功，发送通知
+                        asyncio.run_coroutine_threadsafe(
+                            self.send(text_data=json.dumps({'type': 'asr_status', 'status': 'connected', 'message': '语音识别已启用'})), loop)
+                        return
+                    except Exception as e:
+                        retry_count += 1
+                        print(f"[WebRTCConsumer] RTASR ws connect error (尝试 {retry_count}): {e}")
+                        if retry_count < max_retries:
+                            import time
+                            time.sleep(2)  # 等待2秒后重试
+                        else:
+                            # 所有重试都失败，发送友好的错误消息
+                            error_msg = "语音识别服务暂不可用，但不影响面试进行。您可以继续面试，答案将通过其他方式记录。"
+                            asyncio.run_coroutine_threadsafe(
+                                self.send(text_data=json.dumps({'type': 'asr_status', 'status': 'failed', 'message': error_msg})), loop)
             threading.Thread(target=start_rtasr, daemon=True).start()
-            self.question_queue = await self.init_question_queue()
+            
+            # 注意：问题队列的初始化将在handle_create_stream中进行，因为此时还没有interview_id
             await self.send(text_data=json.dumps({
                 'type': 'connection_established',
                 'session_id': self.session_id,
                 'text': 'WebRTC连接已建立'
             }))
-            # 主动推送面试官开场白
-            await self.send(text_data=json.dumps({
-                'type': 'interview_message',
-                'phase': self.PHASE_INTRO,
-                'text': '请开始自我介绍吧'
-            }))
-            self.phase = self.PHASE_INTRO
         except Exception as e:
             print(f"[WebRTCConsumer] connect error: {e}")
             await self.send(text_data=json.dumps({'type': 'error', 'text': f'初始化失败: {e}'}))
@@ -148,6 +158,10 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 await self.handle_audio_frame(data)
             elif message_type == 'request_next_question':
                 await self.handle_request_next_question()
+            elif message_type == 'answer_completed':
+                await self.handle_answer_completed(data)
+            elif message_type == 'manual_answer_text':
+                await self.handle_manual_answer_text(data)
             elif message_type == 'request_next_coding_problem':
                 await self.handle_request_next_coding_problem()
             elif message_type == 'submit_coding_answer':
@@ -195,27 +209,47 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             
             print("[调试] handle_create_stream - interview_id:", self.interview_id, "resume_id:", self.resume_id)
             
-            # 创建视频流
+            # 创建视频流记录
             self.video_stream = await self.create_video_stream(title, description)
+            if not self.video_stream:
+                raise ValueError("创建视频流失败")
             
-            # 创建WebRTC连接记录
+            # 创建连接记录
             self.connection = await self.create_connection()
+            if not self.connection:
+                raise ValueError("创建连接记录失败")
             
+            # 加入视频流组
+            await self.channel_layer.group_add(
+                f"stream_{self.video_stream.id}",
+                self.channel_name
+            )
+            
+            # 初始化问题队列（现在有了interview_id和resume_id）
+            self.question_queue = await self.init_question_queue()
+            
+            # 返回成功响应
             await self.send(text_data=json.dumps({
                 'type': 'stream_created',
                 'stream_id': str(self.video_stream.id),
-                'title': self.video_stream.title,
-                'interview_id': self.interview_id,
-                'text': '视频流创建成功'
+                'peer_id': self.peer_id
             }))
             
+            # 发送面试官开场白
+            await self.send(text_data=json.dumps({
+                'type': 'interview_message',
+                'phase': self.PHASE_INTRO,
+                'text': '请开始自我介绍吧'
+            }))
+            self.phase = self.PHASE_INTRO
+            
         except Exception as e:
-            logger.error(f"创建视频流失败: {str(e)}")
+            print(f"创建视频流失败: {e}")
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'text': f'创建视频流失败: {str(e)}'
             }))
-    
+            
     async def handle_join_stream(self, data):
         """处理加入视频流请求"""
         try:
@@ -444,10 +478,9 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             if self.rtasr_client and self.rtasr_client.connected and not self.rtasr_client.closed:
                 self.rtasr_client.send_audio(audio_bytes)
             else:
-                await self.send(text_data=json.dumps({
-                    'type': 'error',
-                    'text': 'RTASR未连接'
-                }))
+                # RTASR不可用时，仍然保存音频数据，但不进行实时转写
+                # 这样音频可以用于后续的离线分析
+                pass
             if audio_data:
                 self.audio_buffer.append(audio_data)
         except Exception as e:
@@ -459,96 +492,303 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     async def handle_request_next_question(self):
         """处理前端请求下一个面试问题"""
         if self.question_queue:
-            question = self.question_queue.pop(0)
+            question_data = self.question_queue.pop(0)
+            # 适配新的数据结构
+            if isinstance(question_data, dict):
+                question_text = question_data['question']
+                self.current_question_knowledge_points = question_data['knowledge_points']
+            else:
+                question_text = question_data
+                self.current_question_knowledge_points = ["通用技能", "专业能力"]
+            
             await self.send(text_data=json.dumps({
                 'type': 'next_question',
-                'question': question
+                'question': question_text
             }))
         else:
             await self.send(text_data=json.dumps({
                 'type': 'next_question',
                 'question': '已无更多问题'
             }))
+    
+    async def handle_answer_completed(self, data):
+        """处理用户手动确认答案完成"""
+        print(f"[调试] handle_answer_completed called, phase: {self.phase}")
+        
+        if self.phase == self.PHASE_INTRO:
+            # 自我介绍阶段结束
+            await self.finish_intro()
+        elif self.phase == self.PHASE_QUESTION:
+            # 问答阶段，处理当前问题的答案
+            # 如果有手动输入的答案文本，使用它；否则使用实时收集的文本
+            manual_text = data.get('answer_text', '')
+            if manual_text:
+                self.current_answer_final = [manual_text]
+            elif self.current_answer_sentences:
+                self.current_answer_final = self.current_answer_sentences
+            else:
+                # 如果都没有，提供一个默认的答案记录
+                self.current_answer_final = ["[用户已完成回答，但未收集到文本内容]"]
+            
+            # 保存答案并进入下一题
+            await self.save_current_answer()
+            await self.next_question()
+        else:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'text': f'当前阶段({self.phase})不支持此操作'
+            }))
+    
+    async def handle_manual_answer_text(self, data):
+        """处理用户手动输入的答案文本"""
+        answer_text = data.get('text', '')
+        if answer_text:
+            print(f"[调试] 收到手动输入答案: {answer_text}")
+            # 添加到当前答案句子列表中
+            self.current_answer_sentences.append(answer_text)
+            
+            # 发送确认消息
+            await self.send(text_data=json.dumps({
+                'type': 'manual_answer_received',
+                'text': '答案文本已收到'
+            }))
 
-    async def init_question_queue(self):
+    @database_sync_to_async
+    def init_question_queue(self):
         """初始化面试问题队列"""
+        import re  # 在方法内部重新导入re模块，避免装饰器作用域问题
+        print(f"[调试] init_question_queue - interview_id: {self.interview_id} resume_id: {self.resume_id}")
+        
+        if not self.interview_id or not self.resume_id:
+            print("[调试] init_question_queue - 缺少interview_id或resume_id")
+            return self._get_default_questions_with_knowledge_points()
+            
         try:
-            print("[调试] init_question_queue - interview_id:", self.interview_id, "resume_id:", self.resume_id)
-            
-            if not self.interview_id or not self.resume_id:
-                print("[调试] init_question_queue - 缺少interview_id或resume_id")
-                return [
-                    '请简单自我介绍一下。',
-                    '你为什么选择我们公司？',
-                    '请介绍一下你最近的一个项目。',
-                    '你遇到过最大的技术难题是什么？',
-                    '你对未来的职业规划是什么？'
-                ]
-            
-            # 获取面试和简历信息
             from interviews.models import Interview
             from users.models import Resume
-            
-            try:
-                interview = await database_sync_to_async(Interview.objects.get)(id=self.interview_id)
-                print("[调试] init_question_queue - 获取到interview:", interview)
-                
-                # 优先使用预生成的问题队列
-                if interview.question_queue and len(interview.question_queue) > 0:
-                    print("[调试] init_question_queue - 使用预生成的问题队列:", interview.question_queue)
-                    return interview.question_queue
-                    
-            except Interview.DoesNotExist:
-                print("[调试] init_question_queue - 面试不存在:", self.interview_id)
-                return [
-                    '请简单自我介绍一下。',
-                    '你为什么选择我们公司？',
-                    '请介绍一下你最近的一个项目。',
-                    '你遇到过最大的技术难题是什么？',
-                    '你对未来的职业规划是什么？'
-                ]
-            
-            try:
-                resume = await database_sync_to_async(Resume.objects.get)(id=self.resume_id)
-                print("[调试] init_question_queue - 获取到resume:", resume)
-            except Resume.DoesNotExist:
-                print("[调试] init_question_queue - 简历不存在:", self.resume_id)
-                return [
-                    '请简单自我介绍一下。',
-                    '你为什么选择我们公司？',
-                    '请介绍一下你最近的一个项目。',
-                    '你遇到过最大的技术难题是什么？',
-                    '你对未来的职业规划是什么？'
-                ]
-            
-            # 如果没有预生成的问题队列，则实时生成
-            print("[调试] init_question_queue - 没有预生成问题，实时生成")
+            from knowledge_base.models import JobPosition
             from knowledge_base.services import KnowledgeBaseService
+            
+            # 获取面试和简历信息
+            interview = Interview.objects.select_related('resume').get(id=self.interview_id)
+            resume = Resume.objects.get(id=self.resume_id)
+            
+            # 获取岗位信息
+            position_type = interview.position_type
+            position_name = interview.position_name
+            
+            # 使用知识库服务生成个性化问题
             kb_service = KnowledgeBaseService()
             
-            # 使用database_sync_to_async包装同步方法
-            search_questions = database_sync_to_async(kb_service.search_relevant_questions)
-            questions = await search_questions(interview.position_type, resume, limit=8)
+            # 获取教育背景
+            education_info = "未提供"
+            education_experiences = resume.education_experiences.all()
+            if education_experiences.exists():
+                education_list = []
+                for edu in education_experiences:
+                    edu_str = f"{edu.school_name}"
+                    if edu.education_level:
+                        edu_str += f"({edu.education_level})"
+                    if edu.major:
+                        edu_str += f"-{edu.major}"
+                    education_list.append(edu_str)
+                education_info = "；".join(education_list)
             
-            # 保存生成的问题到数据库
-            async def save_questions():
-                interview.question_queue = questions
-                interview.save()
+            # 获取工作经验
+            work_info = "未提供"
+            work_experiences = resume.work_experiences.all()
+            if work_experiences.exists():
+                work_list = []
+                for work in work_experiences:
+                    work_str = f"{work.company_name}"
+                    if work.position:
+                        work_str += f"-{work.position}"
+                    work_list.append(work_str)
+                work_info = "；".join(work_list)
+            
+            # 获取项目经验
+            project_info = "未提供"
+            project_experiences = resume.project_experiences.all()
+            if project_experiences.exists():
+                project_list = []
+                for proj in project_experiences:
+                    proj_str = f"{proj.project_name}"
+                    if proj.project_role:
+                        proj_str += f"({proj.project_role})"
+                    project_list.append(proj_str)
+                project_info = "；".join(project_list)
+            
+            # 获取技能特长（从期望职位和自定义部分中提取）
+            skills_info = resume.expected_position if resume.expected_position else "未提供"
+            custom_sections = resume.custom_sections.all()
+            if custom_sections.exists():
+                for section in custom_sections:
+                    if "技能" in section.title or "能力" in section.title:
+                        skills_info += f"；{section.content}"
+            
+            # 构建提示词
+            prompt = f"""请根据以下信息生成一个技术面试问题列表：
+
+1. 应聘岗位：{position_name}
+2. 岗位类型：{position_type}
+3. 应聘者教育背景：{education_info}
+4. 技能特长：{skills_info}
+5. 工作经验：{work_info}
+6. 项目经验：{project_info}
+
+要求：
+1. 问题要针对该岗位的核心技能
+2. 结合应聘者的背景设置合适的难度
+3. 问题要由浅入深
+4. 包含理论知识和实践经验的考察
+5. 生成8-10个问题
+6. 每个问题都要详细且专业
+
+请按以下格式输出问题列表：
+1. 问题1
+2. 问题2
+...
+"""
+            # 调用知识库服务生成问题
+            try:
+                questions = kb_service.generate_interview_questions(prompt)
+                print(f"[调试] 知识库服务返回: {questions}")
+            except Exception as kb_e:
+                print(f"[调试] 调用知识库服务失败: {str(kb_e)}")
+                questions = None
+            
+            if not questions:
+                print("[调试] 生成问题失败，使用默认问题")
+                return self._get_default_questions_with_knowledge_points()
                 
-            await database_sync_to_async(save_questions)()
+            # 处理生成的问题并生成知识点标注
+            processed_questions = []
+            for q in questions.split('\n'):
+                # 去除序号和空白
+                q = re.sub(r'^\d+\.\s*', '', q.strip())
+                if q:  # 忽略空行
+                    # 为每个问题生成知识点标注
+                    knowledge_points = self._generate_knowledge_points_for_question(q, position_type, kb_service)
+                    processed_questions.append({
+                        'question': q,
+                        'knowledge_points': knowledge_points
+                    })
             
-            print("[调试] init_question_queue - 获取到问题:", questions)
-            return questions
+            print(f"[调试] 生成的问题列表: {processed_questions}")
+            return processed_questions
             
         except Exception as e:
-            print(f"[调试] init_question_queue错误: {e}")
-            return [
-                '请简单自我介绍一下。',
-                '你为什么选择我们公司？',
-                '请介绍一下你最近的一个项目。',
-                '你遇到过最大的技术难题是什么？',
-                '你对未来的职业规划是什么？'
-            ]
+            print(f"[调试] 初始化问题队列出错: {str(e)}")
+            print(traceback.format_exc())
+            try:
+                return self._get_default_questions_with_knowledge_points()
+            except Exception as default_e:
+                print(f"[调试] 获取默认问题也失败: {str(default_e)}")
+                # 返回最基础的问题列表
+                return [
+                    {
+                        'question': "请简单介绍一下自己。",
+                        'knowledge_points': ["自我介绍", "沟通能力"]
+                    },
+                    {
+                        'question': "你有什么技术经验？",
+                        'knowledge_points': ["技术能力", "工作经验"]
+                    }
+                ]
+    
+    def _get_default_questions(self):
+        """获取默认问题列表"""
+        return [
+            "请简单介绍一下你的技术背景和主要技能。",
+            "你在过去的项目中遇到过什么技术难题？是如何解决的？",
+            "你对我们公司的技术栈了解多少？",
+            "你认为自己的技术优势是什么？",
+            "你平时是如何学习新技术的？",
+            "你对未来的职业规划是什么？"
+        ]
+    
+    def _get_default_questions_with_knowledge_points(self):
+        """获取默认问题列表（包含知识点）"""
+        return [
+            {
+                'question': "请简单介绍一下你的技术背景和主要技能。",
+                'knowledge_points': ["自我表达能力", "技术栈掌握", "沟通能力", "职业素养"]
+            },
+            {
+                'question': "你在过去的项目中遇到过什么技术难题？是如何解决的？",
+                'knowledge_points': ["问题分析能力", "解决方案设计", "技术深度", "实践经验", "逻辑思维"]
+            },
+            {
+                'question': "你对我们公司的技术栈了解多少？",
+                'knowledge_points': ["技术栈理解", "学习能力", "行业认知", "技术前瞻性"]
+            },
+            {
+                'question': "你认为自己的技术优势是什么？",
+                'knowledge_points': ["自我认知", "技术特长", "专业能力", "核心竞争力"]
+            },
+            {
+                'question': "你平时是如何学习新技术的？",
+                'knowledge_points': ["学习方法", "自我提升", "技术热情", "持续学习"]
+            },
+            {
+                'question': "你对未来的职业规划是什么？",
+                'knowledge_points': ["职业规划", "目标设定", "自我发展", "战略思维"]
+            }
+        ]
+    
+    def _generate_knowledge_points_for_question(self, question, position_type, kb_service):
+        """使用讯飞模型为问题生成知识点标注"""
+        import re  # 在方法内部重新导入re模块
+        try:
+            # 构建知识点标注提示词
+            prompt = f"""请为以下技术面试问题标注具体的知识点。要求知识点要非常具体和专业，比如"数据库事务ACID原则"、"HTTP协议状态码"、"React生命周期"等。
+
+问题：{question}
+岗位类型：{position_type}
+
+请列出这个问题可能涉及的3-6个具体知识点，每个知识点都要具体到技术细节。
+请直接输出知识点列表，每行一个，不要序号：
+"""
+            
+            # 调用讯飞模型生成知识点
+            knowledge_points_text = kb_service.generate_interview_questions(prompt)
+            
+            if knowledge_points_text:
+                # 解析知识点
+                knowledge_points = []
+                for line in knowledge_points_text.split('\n'):
+                    point = line.strip()
+                    # 去除可能的序号
+                    point = re.sub(r'^\d+\.\s*', '', point)
+                    point = re.sub(r'^[-•]\s*', '', point)
+                    if point and len(point) > 2:  # 过滤掉太短的文本
+                        knowledge_points.append(point)
+                
+                # 限制知识点数量
+                if len(knowledge_points) > 6:
+                    knowledge_points = knowledge_points[:6]
+                    
+                print(f"[调试] 问题知识点标注: {question} -> {knowledge_points}")
+                return knowledge_points
+            
+        except Exception as e:
+            print(f"[调试] 生成知识点失败: {str(e)}")
+            print(traceback.format_exc())
+        
+        # 如果生成失败，返回默认知识点
+        try:
+            default_points_map = {
+                'backend': ["后端开发", "系统设计", "数据库", "API设计"],
+                'frontend': ["前端开发", "用户界面", "JavaScript", "框架应用"],
+                'pm': ["产品设计", "用户需求", "项目管理", "数据分析"],
+                'qa': ["测试方法", "质量保证", "自动化测试", "缺陷管理"],
+                'algo': ["算法设计", "数据结构", "计算复杂度", "数学建模"],
+                'data': ["数据分析", "机器学习", "数据挖掘", "统计学"]
+            }
+            return default_points_map.get(position_type, ["专业技能", "问题解决", "逻辑思维"])
+        except Exception as default_e:
+            print(f"[调试] 获取默认知识点也失败: {str(default_e)}")
+            return ["通用技能", "专业能力", "沟通表达"]
     
     async def handle_disconnect(self, data):
         """处理断开连接请求"""
@@ -569,10 +809,10 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     
     @database_sync_to_async
     def get_interview_by_id(self, interview_id):
-        """根据面试ID获取面试信息"""
+        """获取面试记录"""
+        from interviews.models import Interview
         try:
-            from interviews.models import Interview
-            return Interview.objects.select_related('job_position', 'resume').get(id=interview_id, user=self.user)
+            return Interview.objects.select_related('user', 'resume').get(id=interview_id)
         except Interview.DoesNotExist:
             return None
     
@@ -633,18 +873,30 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             print(f"[调试] handle_asr_result错误: {e}")
 
     async def finish_intro(self):
+        # 如果还没有初始化问题队列，现在初始化
+        if not self.question_queue:
+            self.question_queue = await self.init_question_queue()
+        
         self.phase = self.PHASE_QUESTION
         await self.send(text_data=json.dumps({
             'type': 'interview_message',
             'phase': self.PHASE_QUESTION,
             'text': '自我介绍结束，下面开始问问题。'
         }))
-        self.question_queue = await self.init_question_queue()
         await self.next_question()
 
     async def next_question(self):
         if self.question_queue:
-            self.current_question = self.question_queue.pop(0)
+            question_data = self.question_queue.pop(0)
+            # 适配新的数据结构（可能是字典或字符串）
+            if isinstance(question_data, dict):
+                self.current_question = question_data['question']
+                self.current_question_knowledge_points = question_data['knowledge_points']
+            else:
+                # 兼容旧格式
+                self.current_question = question_data
+                self.current_question_knowledge_points = ["通用技能", "专业能力"]
+            
             self.current_answer_sentences = []
             self.current_answer_final = []
             from datetime import datetime
@@ -685,12 +937,19 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 from interviews.models import Interview, InterviewAnswer
                 # 获取面试记录
                 interview = await self.get_interview_by_id(self.interview_id)
+                
+                # 获取当前问题的知识点
+                knowledge_points = getattr(self, 'current_question_knowledge_points', [])
+                
                 answer = await database_sync_to_async(InterviewAnswer.objects.create)(
                     interview=interview,
                     user=self.user,
                     question=self.current_question,
-                    answer=answer_text
+                    answer=answer_text,
+                    knowledge_points=knowledge_points  # 保存知识点
                 )
+                
+                print(f"[调试] 已保存答案记录，知识点: {knowledge_points}")
                 
                 # 保存音视频片段
                 av_path = await self.save_av_clip_for_question()
@@ -702,6 +961,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 
                 # 清空当前问题和答案
                 self.current_question = None
+                self.current_question_knowledge_points = []
                 self.current_answer_final = []
                 self.current_answer_sentences = []
                 self.current_answer_start_time = None

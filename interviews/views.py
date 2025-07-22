@@ -2,7 +2,7 @@ from django.shortcuts import render
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import Interview
+from .models import Interview, InterviewAnswer
 from .serializers import InterviewCreateSerializer, InterviewListSerializer
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
 from .models import CodingProblem, CodingExample
+from django.db.models import Avg
 import logging
 
 logger = logging.getLogger(__name__)
@@ -155,3 +156,56 @@ def get_coding_problem_detail(request, problem_id):
         'created_at': problem.created_at,
         'updated_at': problem.updated_at
     })
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_interview_scores(request, interview_id):
+    """获取面试的总体评分"""
+    # 获取面试实例，确保是当前用户的面试
+    interview = get_object_or_404(Interview, id=interview_id, user=request.user)
+    
+    # 获取该面试的所有答案
+    answers = InterviewAnswer.objects.filter(interview=interview)
+    
+    if not answers.exists():
+        return Response({
+            'error': '该面试还没有任何回答记录',
+            'msg': '无法计算评分'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # 计算每个维度的平均分
+    scores = answers.aggregate(
+        avg_professional_knowledge=Avg('professional_knowledge'),
+        avg_skill_matching=Avg('skill_matching'),
+        avg_communication_skills=Avg('communication_skills'),
+        avg_logical_thinking=Avg('logical_thinking'),
+        avg_innovation_ability=Avg('innovation_ability'),
+        avg_stress_handling=Avg('stress_handling')
+    )
+    
+    # 计算总平均分
+    total_score = sum([
+        scores['avg_professional_knowledge'],
+        scores['avg_skill_matching'],
+        scores['avg_communication_skills'],
+        scores['avg_logical_thinking'],
+        scores['avg_innovation_ability'],
+        scores['avg_stress_handling']
+    ]) / 6.0
+    
+    # 构建返回数据
+    response_data = {
+        'interview_id': interview_id,
+        'total_answers': answers.count(),
+        'scores': {
+            'professional_knowledge': round(scores['avg_professional_knowledge'], 2),
+            'skill_matching': round(scores['avg_skill_matching'], 2),
+            'communication_skills': round(scores['avg_communication_skills'], 2),
+            'logical_thinking': round(scores['avg_logical_thinking'], 2),
+            'innovation_ability': round(scores['avg_innovation_ability'], 2),
+            'stress_handling': round(scores['avg_stress_handling'], 2)
+        },
+        'total_score': round(total_score, 2)
+    }
+    
+    return Response(response_data, status=status.HTTP_200_OK)

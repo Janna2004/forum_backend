@@ -86,8 +86,18 @@ class InterviewAnswer(models.Model):
     answer = models.TextField(verbose_name='答案')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='答题时间')
     ai_analysis = models.TextField(blank=True, null=True, verbose_name='AI分析结果')
-    confidence_score = models.FloatField(default=0, verbose_name='信心得分')
-    fluency_score = models.FloatField(default=0, verbose_name='流畅度得分')
+    
+    # 知识点相关字段
+    knowledge_points = models.JSONField(default=list, blank=True, verbose_name='问题知识点', help_text='该问题涉及的具体知识点列表')
+    correctness_score = models.FloatField(default=0, verbose_name='答案正确性分数', help_text='回答正确性评分(1-5分)')
+    
+    # 新增评分维度
+    professional_knowledge = models.FloatField(default=0, verbose_name='专业知识水平')
+    skill_matching = models.FloatField(default=0, verbose_name='技能匹配度')
+    communication_skills = models.FloatField(default=0, verbose_name='语言表达能力')
+    logical_thinking = models.FloatField(default=0, verbose_name='逻辑思维能力')
+    innovation_ability = models.FloatField(default=0, verbose_name='创新能力')
+    stress_handling = models.FloatField(default=0, verbose_name='应变抗压能力')
 
     class Meta:
         verbose_name = '面试答题记录'
