@@ -50,6 +50,8 @@ class InterviewCreateView(generics.CreateAPIView):
                 'position_name': interview.position_name,
                 'company_name': interview.company_name,
                 'position_type': interview.position_type,
+                'question_queue': interview.question_queue,  # 添加问题队列信息
+                'question_count': len(interview.question_queue) if interview.question_queue else 0,  # 问题数量
                 'msg': '面试创建成功'
             }, status=status.HTTP_201_CREATED)
             

@@ -493,6 +493,12 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             try:
                 interview = await database_sync_to_async(Interview.objects.get)(id=self.interview_id)
                 print("[调试] init_question_queue - 获取到interview:", interview)
+                
+                # 优先使用预生成的问题队列
+                if interview.question_queue and len(interview.question_queue) > 0:
+                    print("[调试] init_question_queue - 使用预生成的问题队列:", interview.question_queue)
+                    return interview.question_queue
+                    
             except Interview.DoesNotExist:
                 print("[调试] init_question_queue - 面试不存在:", self.interview_id)
                 return [
@@ -516,13 +522,21 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                     '你对未来的职业规划是什么？'
                 ]
             
-            # 调用知识库服务
+            # 如果没有预生成的问题队列，则实时生成
+            print("[调试] init_question_queue - 没有预生成问题，实时生成")
             from knowledge_base.services import KnowledgeBaseService
             kb_service = KnowledgeBaseService()
             
             # 使用database_sync_to_async包装同步方法
             search_questions = database_sync_to_async(kb_service.search_relevant_questions)
-            questions = await search_questions(interview.position_type, resume, limit=5)
+            questions = await search_questions(interview.position_type, resume, limit=8)
+            
+            # 保存生成的问题到数据库
+            async def save_questions():
+                interview.question_queue = questions
+                interview.save()
+                
+            await database_sync_to_async(save_questions)()
             
             print("[调试] init_question_queue - 获取到问题:", questions)
             return questions

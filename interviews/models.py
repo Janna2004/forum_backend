@@ -42,6 +42,14 @@ class Interview(models.Model):
         verbose_name='岗位类型', 
         default='backend'
     )
+    
+    # 面试问题队列
+    question_queue = models.JSONField(
+        default=list, 
+        blank=True, 
+        verbose_name='面试问题队列',
+        help_text='存储个性化推荐的面试问题列表'
+    )
 
     class Meta:
         verbose_name = '面试'

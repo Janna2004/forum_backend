@@ -2,6 +2,8 @@ from rest_framework import serializers
 from .models import Interview
 from knowledge_base.models import JobPosition
 from users.models import Resume
+import requests
+import json
 
 class InterviewCreateSerializer(serializers.ModelSerializer):
     job_position_id = serializers.IntegerField(required=False, allow_null=True)
@@ -20,8 +22,9 @@ class InterviewCreateSerializer(serializers.ModelSerializer):
             'position_description',
             'position_requirements',
             'position_type',
+            'question_queue',  # 添加问题队列字段
         ]
-        read_only_fields = ['id']  # 标记id为只读字段
+        read_only_fields = ['id', 'question_queue']  # 标记为只读字段
 
     def validate_job_position_id(self, value):
         if value:
@@ -39,6 +42,35 @@ class InterviewCreateSerializer(serializers.ModelSerializer):
             return value
         except Resume.DoesNotExist:
             raise serializers.ValidationError("指定的简历不存在或不属于当前用户")
+
+    def _generate_interview_questions(self, interview):
+        """调用个性化推荐API生成面试问题"""
+        try:
+            from knowledge_base.services import KnowledgeBaseService
+            
+            # 使用KnowledgeBaseService生成问题
+            kb_service = KnowledgeBaseService()
+            questions = kb_service.search_relevant_questions(
+                position_type=interview.position_type,
+                resume=interview.resume,
+                limit=8  # 增加问题数量
+            )
+            
+            return questions
+            
+        except Exception as e:
+            print(f"生成面试问题失败: {e}")
+            # 返回默认问题
+            return [
+                '请简单自我介绍一下。',
+                f'你为什么选择{interview.company_name}？',
+                '请介绍一下你最近的一个项目。',
+                '你遇到过最大的技术难题是什么？',
+                '你对未来的职业规划是什么？',
+                f'你对{interview.position_name}这个岗位有什么了解？',
+                '你的优势和劣势分别是什么？',
+                '你还有什么问题要问我们的吗？'
+            ]
 
     def create(self, validated_data):
         user = self.context['request'].user
@@ -68,11 +100,20 @@ class InterviewCreateSerializer(serializers.ModelSerializer):
             from django.utils import timezone
             validated_data['interview_time'] = timezone.now()
         
-        return super().create(validated_data)
+        # 创建面试记录
+        interview = super().create(validated_data)
+        
+        # 生成个性化面试问题队列
+        questions = self._generate_interview_questions(interview)
+        interview.question_queue = questions
+        interview.save()
+        
+        return interview
 
 
 class InterviewListSerializer(serializers.ModelSerializer):
     """面试列表序列化器"""
+    question_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Interview
@@ -82,6 +123,11 @@ class InterviewListSerializer(serializers.ModelSerializer):
             'position_name',
             'company_name',
             'position_type',
+            'question_count',  # 添加问题数量字段
             'created_at',
             'updated_at',
-        ] 
+        ]
+    
+    def get_question_count(self, obj):
+        """获取问题数量"""
+        return len(obj.question_queue) if obj.question_queue else 0 
