@@ -13,6 +13,6 @@ urlpatterns = [
     path('posts/', include('posts.urls')),
     path('webrtc/', include('webrtc.urls')),
     path('knowledge-base/', include('knowledge_base.urls')),
-    path('interviews/', include('interviews.urls')),
+    path('interview/', include('interviews.urls')),  # 修改为单数形式，匹配API规范
     path('positions/', include('positions.urls')),  # 添加positions的URL配置
 ]

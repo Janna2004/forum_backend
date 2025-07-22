@@ -1,17 +1,16 @@
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
+from django.db.models import Avg
+import logging
+
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import Interview, InterviewAnswer
-from .serializers import InterviewCreateSerializer, InterviewListSerializer
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
-from django.shortcuts import get_object_or_404
-from .models import CodingProblem, CodingExample
-from django.db.models import Avg
-import logging
+
+from .models import Interview, InterviewAnswer, CodingProblem, CodingExample
+from .serializers import InterviewCreateSerializer, InterviewListSerializer
+from .services import InterviewEvaluationService
 
 logger = logging.getLogger(__name__)
 
@@ -209,3 +208,82 @@ def get_interview_scores(request, interview_id):
     }
     
     return Response(response_data, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_interview_evaluation(request, format=None):
+    """获取面试评估结果"""
+    try:
+        # 获取interview_id参数
+        interview_id = request.query_params.get('interview_id')
+        if not interview_id or not interview_id.isdigit():
+            return Response(
+                {'error': '请提供有效的interview_id参数'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 验证面试记录是否属于当前用户
+        interview = get_object_or_404(
+            Interview,
+            id=int(interview_id),
+            user=request.user
+        )
+        
+        # 获取评估结果
+        evaluation_service = InterviewEvaluationService()
+        result = evaluation_service.get_evaluation_result(interview_id)
+        
+        if not result:
+            return Response(
+                {'error': '无法生成评估结果，可能是因为没有答题记录'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # 添加调试日志
+        logger.info(f"生成面试评估结果 - 面试ID: {interview_id}, 用户: {request.user.id}")
+        
+        return Response(result)
+        
+    except Interview.DoesNotExist:
+        return Response(
+            {'error': '面试记录不存在或无权访问'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except ValueError as e:
+        return Response(
+            {'error': f'参数错误: {str(e)}'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    except Exception as e:
+        logger.error(f"生成评估结果失败 - 面试ID: {interview_id}, 错误: {str(e)}")
+        return Response(
+            {'error': f'获取评估结果失败: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_evaluation_overview(request):
+    """获取用户总体能力评估"""
+    try:
+        # 获取评估结果
+        evaluation_service = InterviewEvaluationService()
+        result = evaluation_service.get_user_overall_evaluation(request.user)
+        
+        if not result:
+            return Response(
+                {'error': '无法生成评估结果，可能是因为没有面试记录'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # 添加调试日志
+        logger.info(f"生成用户总体评估结果 - 用户: {request.user.id}")
+        
+        return Response(result)
+        
+    except Exception as e:
+        logger.error(f"生成用户总体评估失败 - 用户: {request.user.id}, 错误: {str(e)}")
+        return Response(
+            {'error': f'获取评估结果失败: {str(e)}'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

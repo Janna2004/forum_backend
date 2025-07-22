@@ -2,33 +2,29 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
+import math
+import os
+import re
+import requests
 import threading
 import time
-from datetime import datetime
-from urllib.parse import urlencode, quote
-import websocket
-from websocket import create_connection, WebSocketConnectionClosedException
-from django.conf import settings
-import os
-import requests
-import datetime
-import hashlib
-import base64
-import hmac
-import json
-import re
-from django.conf import settings
-import time
-import base64
-import urllib  # 补充导入
+import traceback
 import urllib.parse
 from datetime import datetime
-from wsgiref.handlers import format_date_time
 from time import mktime
-from urllib.parse import urlparse, quote
+from urllib.parse import urlencode, quote, urlparse
 from urllib3 import encode_multipart_formdata
-import math
-import traceback
+from wsgiref.handlers import format_date_time
+import websocket
+from websocket import create_connection, WebSocketConnectionClosedException
+
+from django.conf import settings
+from django.db import models
+
+from knowledge_base.services import XunfeiSparkService
+
+logger = logging.getLogger(__name__)
 
 class XunfeiRealtimeTranscribeClient:
     """
@@ -734,3 +730,436 @@ class CodingProblemService:
         score += random.randint(0, 5)
         
         return score 
+
+from knowledge_base.services import XunfeiSparkService
+
+class InterviewEvaluationService:
+    """面试评估服务"""
+    
+    def __init__(self):
+        self.spark_service = XunfeiSparkService()
+    
+    def get_evaluation_result(self, interview_id):
+        """获取面试评估结果"""
+        from .models import Interview, InterviewAnswer
+        
+        try:
+            # 获取面试记录及其所有答案
+            interview = Interview.objects.get(id=interview_id)
+            answers = InterviewAnswer.objects.filter(interview=interview)
+            
+            if not answers.exists():
+                return None
+            
+            # 计算六个维度的平均分
+            dimensions = [
+                '专业知识水平', '技能匹配度', '语言表达能力',
+                '逻辑思维能力', '创新能力', '应变抗压能力'
+            ]
+            
+            scores = []
+            for dimension in dimensions:
+                field_name = {
+                    '专业知识水平': 'professional_knowledge',
+                    '技能匹配度': 'skill_matching',
+                    '语言表达能力': 'communication_skills',
+                    '逻辑思维能力': 'logical_thinking',
+                    '创新能力': 'innovation_ability',
+                    '应变抗压能力': 'stress_handling'
+                }[dimension]
+                
+                avg_score = answers.aggregate(
+                    avg_score=models.Avg(field_name)
+                )['avg_score'] or 0
+                scores.append(round(avg_score * 20, 1))  # 转换为百分制
+            
+            # 生成雷达图评论
+            radar_comment = self._generate_radar_comment(dimensions, scores)
+            
+            # 统计知识点分布
+            knowledge_points = {}
+            for answer in answers:
+                if answer.knowledge_points:
+                    for point in answer.knowledge_points:
+                        knowledge_points[point] = knowledge_points.get(point, 0) + 1
+            
+            # 转换为饼图数据
+            pie_points = [
+                {'label': point, 'value': count}
+                for point, count in knowledge_points.items()
+            ]
+            
+            # 生成饼图评论
+            pie_comment = self._generate_pie_comment(pie_points)
+            
+            # 计算知识点掌握情况
+            mastery_data = {}
+            for answer in answers:
+                if answer.knowledge_points and answer.correctness_score:
+                    for point in answer.knowledge_points:
+                        if point not in mastery_data:
+                            mastery_data[point] = {'total': 0, 'count': 0}
+                        mastery_data[point]['total'] += answer.correctness_score
+                        mastery_data[point]['count'] += 1
+            
+            # 转换为柱状图数据
+            bar_labels = []
+            bar_accuracy = []
+            for point, data in mastery_data.items():
+                bar_labels.append(point)
+                accuracy = data['total'] / (data['count'] * 5)  # 转换为0-1的比例
+                bar_accuracy.append(round(accuracy, 2))
+            
+            # 生成柱状图评论
+            bar_comment = self._generate_bar_comment(bar_labels, bar_accuracy)
+            
+            # 计算总分
+            total_score = round(sum(scores) / len(scores), 1)
+            
+            # 获取上一次面试结果进行对比
+            last_compare = self._get_last_compare_result(interview, dimensions, scores)
+            
+            # 生成总结
+            summary = self._generate_summary(interview, answers, scores, knowledge_points)
+            
+            return {
+                'radar': {
+                    'data': {
+                        'dimensions': dimensions,
+                        'scores': scores
+                    },
+                    'comment': radar_comment
+                },
+                'pie': {
+                    'data': {
+                        'points': pie_points
+                    },
+                    'comment': pie_comment
+                },
+                'bar': {
+                    'data': {
+                        'labels': bar_labels,
+                        'accuracy': bar_accuracy
+                    },
+                    'comment': bar_comment
+                },
+                'score': total_score,
+                'lastCompare': last_compare,
+                'summary': summary
+            }
+            
+        except Interview.DoesNotExist:
+            return None
+        except Exception as e:
+            print(f"生成评估结果时出错: {e}")
+            return None
+    
+    def _generate_radar_comment(self, dimensions, scores):
+        """生成雷达图评论"""
+        try:
+            # 找出最高和最低分的维度
+            max_score_idx = scores.index(max(scores))
+            min_score_idx = scores.index(min(scores))
+            
+            prompt = f"""请根据以下面试能力评估数据，生成一句简短的点评：
+
+各维度得分：
+{dimensions[max_score_idx]}: {scores[max_score_idx]}分（最高）
+{dimensions[min_score_idx]}: {scores[min_score_idx]}分（最低）
+
+要求：
+1. 评论要简短精炼，不超过30个字
+2. 突出优势，指出改进方向
+3. 语气要积极专业
+"""
+            comment = self.spark_service._send_message(prompt)
+            return comment.strip() if comment else f"{dimensions[max_score_idx]}表现突出，{dimensions[min_score_idx]}方面需加强。"
+            
+        except Exception as e:
+            print(f"生成雷达图评论出错: {e}")
+            return f"{dimensions[max_score_idx]}表现突出，{dimensions[min_score_idx]}方面需加强。"
+    
+    def _generate_pie_comment(self, points):
+        """生成知识点分布评论"""
+        try:
+            # 按数量排序
+            sorted_points = sorted(points, key=lambda x: x['value'], reverse=True)
+            
+            prompt = f"""请根据以下知识点分布数据，生成一句简短的点评：
+
+知识点分布：
+{sorted_points[0]['label']}: {sorted_points[0]['value']}次（最多）
+{sorted_points[-1]['label']}: {sorted_points[-1]['value']}次（最少）
+
+要求：
+1. 评论要简短精炼，不超过30个字
+2. 评价分布是否均衡
+3. 给出针对性建议
+"""
+            comment = self.spark_service._send_message(prompt)
+            return comment.strip() if comment else f"题目分布较均衡，建议重点巩固{sorted_points[0]['label']}模块。"
+            
+        except Exception as e:
+            print(f"生成知识点分布评论出错: {e}")
+            return "题目分布较均衡，建议系统性复习。"
+    
+    def _generate_bar_comment(self, labels, accuracy):
+        """生成知识点掌握评论"""
+        try:
+            if not labels or not accuracy:
+                return "暂无足够数据评估知识点掌握情况。"
+                
+            # 找出掌握最好和最差的知识点
+            max_acc_idx = accuracy.index(max(accuracy))
+            min_acc_idx = accuracy.index(min(accuracy))
+            
+            prompt = f"""请根据以下知识点掌握情况，生成一句简短的点评：
+
+知识点掌握度：
+{labels[max_acc_idx]}: {accuracy[max_acc_idx]*100:.0f}%（最高）
+{labels[min_acc_idx]}: {accuracy[min_acc_idx]*100:.0f}%（最低）
+
+要求：
+1. 评论要简短精炼，不超过30个字
+2. 肯定优势，指出提升空间
+3. 语气要积极专业
+"""
+            comment = self.spark_service._send_message(prompt)
+            return comment.strip() if comment else f"{labels[max_acc_idx]}掌握扎实，{labels[min_acc_idx]}模块有待提高。"
+            
+        except Exception as e:
+            print(f"生成知识点掌握评论出错: {e}")
+            return f"{labels[max_acc_idx]}掌握扎实，{labels[min_acc_idx]}模块有待提高。"
+    
+    def _get_last_compare_result(self, interview, dimensions, scores):
+        """获取与上一次面试的对比结果"""
+        try:
+            # 获取同一用户之前的面试记录
+            last_interview = (
+                Interview.objects
+                .filter(
+                    user=interview.user,
+                    interview_time__lt=interview.interview_time,
+                    position_type=interview.position_type
+                )
+                .order_by('-interview_time')
+                .first()
+            )
+            
+            if not last_interview:
+                return None
+                
+            # 获取上一次面试的评估结果
+            last_result = self.get_evaluation_result(last_interview.id)
+            if not last_result:
+                return None
+            
+            # 计算分数变化
+            score_change = round(
+                sum(scores) / len(scores) - 
+                sum(last_result['radar']['data']['scores']) / len(last_result['radar']['data']['scores']),
+                1
+            )
+            
+            # 计算各维度变化
+            radar_delta = []
+            for i in range(len(dimensions)):
+                delta = round(scores[i] - last_result['radar']['data']['scores'][i], 1)
+                radar_delta.append(delta)
+            
+            return {
+                'scoreChange': score_change,
+                'radarDelta': radar_delta
+            }
+            
+        except Exception as e:
+            print(f"获取对比结果出错: {e}")
+            return None
+    
+    def _generate_summary(self, interview, answers, scores, knowledge_points):
+        """生成面试总结"""
+        try:
+            # 构建STAR结构
+            star_prompt = f"""请根据以下面试信息，生成一个简短的STAR结构总结：
+
+面试岗位：{interview.position_name}
+面试表现：总分{sum(scores)/len(scores):.1f}分
+涉及知识点：{', '.join(knowledge_points.keys())}
+
+要求：
+1. 使用STAR结构（情境、任务、行动、结果）
+2. 每个部分简短精炼
+3. 突出技术亮点
+4. 总字数不超过100字
+"""
+            star_structure = self.spark_service._send_message(star_prompt)
+            
+            # 生成技术总结
+            tech_prompt = f"""请根据以下面试信息，生成一句技术能力总结：
+
+面试岗位：{interview.position_name}
+最近一次答案：{answers.last().answer if answers.exists() else ''}
+涉及知识点：{', '.join(knowledge_points.keys())}
+
+要求：
+1. 总结要简短精炼，不超过30个字
+2. 突出技术特点和进步
+3. 语气要积极专业
+"""
+            technical_summary = self.spark_service._send_message(tech_prompt)
+            
+            return {
+                'starStructure': star_structure.strip() if star_structure else 'S: 遇到系统设计题；T: 需要高并发分析；A: 正确使用缓存和分布式锁；R: 得到面试官好评。',
+                'technicalSummary': technical_summary.strip() if technical_summary else '系统设计能力进步明显，表达清晰。'
+            }
+            
+        except Exception as e:
+            print(f"生成面试总结出错: {e}")
+            return {
+                'starStructure': 'S: 遇到系统设计题；T: 需要高并发分析；A: 正确使用缓存和分布式锁；R: 得到面试官好评。',
+                'technicalSummary': '系统设计能力进步明显，表达清晰。'
+            } 
+
+    def get_user_overall_evaluation(self, user):
+        """获取用户总体能力评估"""
+        from .models import Interview, InterviewAnswer
+        from django.db.models import Avg, Count
+        from django.db.models.functions import TruncDate
+        
+        try:
+            # 获取用户所有面试记录
+            interviews = Interview.objects.filter(user=user).order_by('interview_time')
+            if not interviews.exists():
+                return None
+            
+            # 获取所有答案记录
+            answers = InterviewAnswer.objects.filter(interview__in=interviews)
+            if not answers.exists():
+                return None
+            
+            # 1. 计算六个维度的平均分
+            dimensions = [
+                '专业知识水平', '技能匹配度', '语言表达能力',
+                '逻辑思维能力', '创新能力', '应变抗压能力'
+            ]
+            
+            scores = []
+            for dimension in dimensions:
+                field_name = {
+                    '专业知识水平': 'professional_knowledge',
+                    '技能匹配度': 'skill_matching',
+                    '语言表达能力': 'communication_skills',
+                    '逻辑思维能力': 'logical_thinking',
+                    '创新能力': 'innovation_ability',
+                    '应变抗压能力': 'stress_handling'
+                }[dimension]
+                
+                avg_score = answers.aggregate(
+                    avg_score=models.Avg(field_name)
+                )['avg_score'] or 0
+                scores.append(round(avg_score * 20, 1))  # 转换为百分制
+            
+            # 2. 计算知识点掌握进度
+            knowledge_points = {}
+            for answer in answers:
+                if answer.knowledge_points and answer.correctness_score:
+                    for point in answer.knowledge_points:
+                        if point not in knowledge_points:
+                            knowledge_points[point] = {'total': 0, 'count': 0}
+                        knowledge_points[point]['total'] += answer.correctness_score
+                        knowledge_points[point]['count'] += 1
+            
+            # 转换为进度数据
+            mastery_labels = []
+            mastery_progress = []
+            for point, data in knowledge_points.items():
+                mastery_labels.append(point)
+                progress = data['total'] / (data['count'] * 5)  # 转换为0-1的比例
+                mastery_progress.append(round(progress, 2))
+            
+            # 3. 计算总分趋势
+            trends = answers.annotate(
+                date=TruncDate('created_at')
+            ).values('date').annotate(
+                avg_score=Avg(
+                    models.F('professional_knowledge') +
+                    models.F('skill_matching') +
+                    models.F('communication_skills') +
+                    models.F('logical_thinking') +
+                    models.F('innovation_ability') +
+                    models.F('stress_handling')
+                ) / 6 * 20  # 计算平均分并转换为百分制
+            ).order_by('date')
+            
+            trend_dates = []
+            trend_scores = []
+            for trend in trends:
+                trend_dates.append(trend['date'].strftime('%Y-%m-%d'))
+                trend_scores.append(round(trend['avg_score'], 1))
+            
+            # 4. 生成总体评价
+            summary = self._generate_overall_summary(
+                dimensions, scores,
+                mastery_labels, mastery_progress,
+                trend_scores
+            )
+            
+            return {
+                'radar': {
+                    'dimensions': dimensions,
+                    'scores': scores
+                },
+                'masteryProgress': {
+                    'labels': mastery_labels,
+                    'progress': mastery_progress
+                },
+                'trend': {
+                    'dates': trend_dates,
+                    'scores': trend_scores
+                },
+                'summary': summary
+            }
+            
+        except Exception as e:
+            print(f"生成总体评估结果失败: {e}")
+            print(traceback.format_exc())
+            return None
+    
+    def _generate_overall_summary(self, dimensions, scores, mastery_labels, mastery_progress, trend_scores):
+        """生成总体评价"""
+        try:
+            # 找出最强和最弱维度
+            max_score_idx = scores.index(max(scores))
+            min_score_idx = scores.index(min(scores))
+            
+            # 找出掌握最好和最差的知识点
+            max_progress_idx = mastery_progress.index(max(mastery_progress))
+            min_progress_idx = mastery_progress.index(min(mastery_progress))
+            
+            # 计算分数趋势
+            score_trend = "上升" if trend_scores[-1] > trend_scores[0] else "下降" if trend_scores[-1] < trend_scores[0] else "稳定"
+            
+            prompt = f"""请根据以下面试数据，生成一句简短的总体评价：
+
+1. 能力维度：
+- 最强：{dimensions[max_score_idx]} ({scores[max_score_idx]}分)
+- 最弱：{dimensions[min_score_idx]} ({scores[min_score_idx]}分)
+
+2. 知识点掌握：
+- 最好：{mastery_labels[max_progress_idx]} ({mastery_progress[max_progress_idx]*100:.0f}%)
+- 最差：{mastery_labels[min_progress_idx]} ({mastery_progress[min_progress_idx]*100:.0f}%)
+
+3. 分数趋势：{score_trend}
+
+要求：
+1. 评价要简短精炼，不超过50个字
+2. 突出进步和优势
+3. 给出改进建议
+4. 语气要积极专业
+"""
+            summary = self.spark_service._send_message(prompt)
+            return summary.strip() if summary else f"你在{dimensions[max_score_idx]}表现突出，{mastery_labels[max_progress_idx]}掌握稳定，{dimensions[min_score_idx]}仍有提升空间。"
+            
+        except Exception as e:
+            print(f"生成总体评价失败: {e}")
+            return "你在技术面试中展现出良好的专业能力，建议继续保持并加强薄弱环节。" 
