@@ -933,6 +933,8 @@ class InterviewEvaluationService:
     
     def _get_last_compare_result(self, interview, dimensions, scores):
         """获取与上一次面试的对比结果"""
+        from .models import Interview
+        
         try:
             # 获取同一用户之前的面试记录
             last_interview = (

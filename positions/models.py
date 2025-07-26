@@ -12,7 +12,7 @@ class Position(models.Model):
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
-        db_table = 'positions_position'  # 使用默认的表名
+        db_table = 'nowcoder_data'  # 使用默认的表名
         managed = True
         verbose_name = '职位信息（已废弃）'
         verbose_name_plural = verbose_name
