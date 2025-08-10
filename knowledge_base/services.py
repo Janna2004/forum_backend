@@ -7,7 +7,9 @@ import websocket
 import threading
 import re
 from datetime import datetime
+from time import mktime
 from urllib.parse import urlencode
+from wsgiref.handlers import format_date_time
 from typing import List, Dict, Any
 from django.conf import settings
 from django.db import models
@@ -26,23 +28,36 @@ class XunfeiSparkService:
         
     def _create_url(self):
         """生成鉴权url"""
-        # 生成RFC1123格式的时间戳
+        # 生成RFC1123格式的时间戳 - 使用与test_llm.py相同的方式
         now = datetime.now()
-        date = now.strftime('%a, %d %b %Y %H:%M:%S GMT')
+        date = format_date_time(mktime(now.timetuple()))
         
-        # 拼接字符串
-        signature_origin = f"host: spark-api.xf-yun.com\ndate: {date}\nGET /v3.1/chat HTTP/1.1"
+        print(f"[调试] 生成的日期: {date}")
+        print(f"[调试] API_SECRET: {self.api_secret}")
+        print(f"[调试] API_KEY: {self.api_key}")
         
-        # 使用hmac-sha256进行加密
+        # 拼接字符串 - 使用与test_llm.py相同的格式
+        signature_origin = "host: " + "spark-api.xf-yun.com" + "\n"
+        signature_origin += "date: " + date + "\n"
+        signature_origin += "GET /v3.1/chat HTTP/1.1"
+        
+        print(f"[调试] 签名原始字符串: {signature_origin}")
+        
+        # 使用hmac-sha256进行加密 - 与test_llm.py保持一致
         signature_sha = hmac.new(
             self.api_secret.encode('utf-8'),
             signature_origin.encode('utf-8'),
             digestmod=hashlib.sha256
         ).digest()
         
-        signature_sha_base64 = base64.b64encode(signature_sha).decode()
+        signature_sha_base64 = base64.b64encode(signature_sha).decode('utf-8')
+        print(f"[调试] 生成的签名: {signature_sha_base64}")
+        
         authorization_origin = f'api_key="{self.api_key}", algorithm="hmac-sha256", headers="host date request-line", signature="{signature_sha_base64}"'
-        authorization = base64.b64encode(authorization_origin.encode('utf-8')).decode()
+        authorization = base64.b64encode(authorization_origin.encode('utf-8')).decode('utf-8')
+        
+        print(f"[调试] authorization_origin: {authorization_origin}")
+        print(f"[调试] authorization: {authorization}")
         
         # 将请求的鉴权参数组合为字典
         v = {
@@ -58,7 +73,11 @@ class XunfeiSparkService:
     
     def _send_message(self, message: str) -> str:
         """发送消息到星火API并获取回复"""
+        print(f"[调试] XunfeiSparkService._send_message 开始调用")
+        print(f"[调试] 消息内容: {message[:100]}...")
+        
         url = self._create_url()
+        print(f"[调试] 生成的URL: {url}")
         
         # 构建请求数据
         data = {
@@ -68,9 +87,10 @@ class XunfeiSparkService:
             },
             "parameter": {
                 "chat": {
-                    "domain": "general",
+                    "domain": "generalv3",
                     "temperature": 0.7,
-                    "max_tokens": 2048
+                    "max_tokens": 2048,
+                    "top_k": 6
                 }
             },
             "payload": {
@@ -82,28 +102,49 @@ class XunfeiSparkService:
             }
         }
         
+        print(f"[调试] 请求数据: {json.dumps(data, ensure_ascii=False)}")
+        
+        # 使用事件来同步响应完成
+        response_complete = threading.Event()
         response_text = ""
+        response_error = None
         
         def on_message(ws, message):
-            nonlocal response_text
-            data = json.loads(message)
-            code = data['header']['code']
-            if code != 0:
-                print(f'请求错误: {code}, {data}')
-                ws.close()
-            else:
-                text = data['payload']['choices']['text'][0]['content']
-                response_text += text
-                if data['header']['status'] == 2:
-                    ws.close()
+            nonlocal response_text, response_error
+            print(f"[调试] 收到WebSocket消息: {message}")
+            try:
+                data = json.loads(message)
+                code = data['header']['code']
+                if code != 0:
+                    print(f'[调试] 请求错误: {code}, {data}')
+                    response_error = f"API错误: {code}"
+                    response_complete.set()
+                else:
+                    text = data['payload']['choices']['text'][0]['content']
+                    response_text += text
+                    print(f"[调试] 累积响应文本: {response_text}")
+                    if data['header']['status'] == 2:
+                        print("[调试] 响应完成，设置完成事件")
+                        response_complete.set()
+            except Exception as e:
+                print(f"[调试] 解析消息时出错: {e}")
+                response_error = f"解析错误: {e}"
+                response_complete.set()
         
         def on_error(ws, error):
-            print(f"错误: {error}")
+            nonlocal response_error
+            print(f"[调试] WebSocket错误: {error}")
+            response_error = f"WebSocket错误: {error}"
+            response_complete.set()
         
         def on_close(ws, close_status_code, close_msg):
-            print("连接关闭")
+            print(f"[调试] WebSocket连接关闭: {close_status_code}, {close_msg}")
+            # 只有在没有设置完成事件时才设置
+            if not response_complete.is_set():
+                response_complete.set()
         
         def on_open(ws):
+            print("[调试] WebSocket连接打开，发送数据")
             ws.send(json.dumps(data))
         
         # 创建WebSocket连接
@@ -120,11 +161,17 @@ class XunfeiSparkService:
         wst.daemon = True
         wst.start()
         
-        # 等待响应完成
-        while ws.sock and ws.sock.connected:
-            time.sleep(0.1)
-        
-        return response_text
+        # 等待响应完成事件
+        timeout = 30  # 30秒超时
+        if response_complete.wait(timeout=timeout):
+            print(f"[调试] 响应完成，最终响应文本: {response_text}")
+            if response_error:
+                print(f"[调试] 响应过程中出现错误: {response_error}")
+                return ""
+            return response_text
+        else:
+            print("[调试] WebSocket请求超时")
+            return ""
     
     def generate_interview_questions(self, job_position: JobPosition, resume: Resume) -> List[str]:
         """根据岗位和简历生成面试问题"""
@@ -219,25 +266,23 @@ class KnowledgeBaseService:
             
             print(f"[调试] 提取的信息 - 岗位: {position}, 类型: {position_type}, 技能: {skills}")
             
-            # 先尝试使用基于规则的问题生成，避免API调用
-            rule_based_questions = self._generate_rule_based_questions(
-                position, position_type, skills, projects
-            )
+            # 优先尝试AI生成
+            print("[调试] 优先尝试AI服务生成问题")
             
-            if rule_based_questions:
-                print(f"[调试] 使用基于规则的问题生成，共{len(rule_based_questions)}个问题")
-                return '\n'.join([f"{i+1}. {q}" for i, q in enumerate(rule_based_questions)])
-            
-            # 如果规则生成失败，再尝试API调用（设置超时）
-            print("[调试] 尝试调用AI服务生成问题")
-            
-            # 构建简化的提示词
-            simple_prompt = f"""请为{position_type}岗位生成8个面试问题，要求简洁专业：
+            # 构建AI提示词
+            ai_prompt = f"""请为{position_type}岗位生成8个专业的面试问题，要求：
 
 岗位：{position}
 技能：{skills}
+项目经验：{projects}
 
-请直接列出问题，每行一个："""
+要求：
+1. 问题要专业、针对性强
+2. 涵盖技术深度和广度
+3. 结合岗位技能要求
+4. 每行一个问题，直接列出
+
+请生成8个面试问题："""
             
             # 设置超时调用AI服务（使用线程超时）
             import threading
@@ -245,31 +290,68 @@ class KnowledgeBaseService:
             
             def call_ai_service():
                 try:
-                    result["response"] = self.spark_service._send_message(simple_prompt)
+                    result["response"] = self.spark_service._send_message(ai_prompt)
                 except Exception as e:
                     result["error"] = str(e)
             
             thread = threading.Thread(target=call_ai_service)
             thread.start()
-            thread.join(timeout=5)  # 5秒超时
+            thread.join(timeout=10)  # 10秒超时
             
             if thread.is_alive():
-                print("[调试] AI服务调用超时")
-                return ""
+                print("[调试] AI服务调用超时，切换到规则生成")
+                # AI超时，使用规则生成
+                rule_based_questions = self._generate_rule_based_questions(
+                    position, position_type, skills, projects
+                )
+                if rule_based_questions:
+                    print(f"[调试] 使用基于规则的问题生成，共{len(rule_based_questions)}个问题")
+                    return '\n'.join([f"{i+1}. {q}" for i, q in enumerate(rule_based_questions)])
+                else:
+                    print("[调试] 规则生成也失败")
+                    return ""
             elif result["error"]:
-                print(f"[调试] AI服务调用失败: {result['error']}")
-                return ""
-            elif result["response"]:
-                print(f"[调试] AI服务返回: {result['response'][:100]}...")
+                print(f"[调试] AI服务调用失败: {result['error']}，切换到规则生成")
+                # AI失败，使用规则生成
+                rule_based_questions = self._generate_rule_based_questions(
+                    position, position_type, skills, projects
+                )
+                if rule_based_questions:
+                    print(f"[调试] 使用基于规则的问题生成，共{len(rule_based_questions)}个问题")
+                    return '\n'.join([f"{i+1}. {q}" for i, q in enumerate(rule_based_questions)])
+                else:
+                    print("[调试] 规则生成也失败")
+                    return ""
+            elif result["response"] and result["response"].strip():
+                print(f"[调试] AI服务成功返回: {result['response'][:100]}...")
                 return result["response"]
             else:
-                print("[调试] AI服务返回空结果")
-                return ""
+                print("[调试] AI服务返回空结果，切换到规则生成")
+                # AI返回空结果，使用规则生成
+                rule_based_questions = self._generate_rule_based_questions(
+                    position, position_type, skills, projects
+                )
+                if rule_based_questions:
+                    print(f"[调试] 使用基于规则的问题生成，共{len(rule_based_questions)}个问题")
+                    return '\n'.join([f"{i+1}. {q}" for i, q in enumerate(rule_based_questions)])
+                else:
+                    print("[调试] 规则生成也失败")
+                    return ""
             
         except Exception as e:
             print(f"[调试] 生成面试问题时出错: {e}")
             import traceback
             print(traceback.format_exc())
+            # 异常情况下也尝试规则生成
+            try:
+                rule_based_questions = self._generate_rule_based_questions(
+                    position, position_type, skills, projects
+                )
+                if rule_based_questions:
+                    print(f"[调试] 异常情况下使用规则生成，共{len(rule_based_questions)}个问题")
+                    return '\n'.join([f"{i+1}. {q}" for i, q in enumerate(rule_based_questions)])
+            except:
+                pass
             return ""
     
     def _generate_rule_based_questions(self, position, position_type, skills, projects):

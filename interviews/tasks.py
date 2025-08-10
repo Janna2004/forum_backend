@@ -3,28 +3,45 @@ from django.conf import settings
 import base64
 from openai import OpenAI
 from .models import InterviewAnswer
+from .services import XunfeiASRService  # 添加这行导入
 import traceback
 import os
 import time
 
 @shared_task(name='interviews.analyze_interview_answer')
-def analyze_interview_answer(answer_id, av_path=None):
+def analyze_interview_answer(answer_id, av_path=None, audio_path=None, has_audio=False, has_video=False):
     """异步分析面试回答"""
     print(f"[调试] 开始处理面试回答分析任务 - answer_id: {answer_id}")
+    print(f"[调试] 文件信息 - av_path: {av_path}, audio_path: {audio_path}, has_audio: {has_audio}, has_video: {has_video}")
+    
     try:
         # 获取面试答案记录
         answer = InterviewAnswer.objects.get(id=answer_id)
         print(f"[调试] 成功获取答案记录 - answer_id: {answer_id}")
         
-        # 注意：ASR转写已在面试过程中通过RTASR实时完成
-        # 答案文本已经保存，不需要再次转写音频文件
-        # 音视频文件仅用于qwen-omni的多模态分析（情感、表情、肢体语言等）
+        # 第一步：优先使用音频文件进行ASR转写并更新数据库
+        if has_audio and audio_path and os.path.exists(audio_path):
+            print(f"[调试] 使用音频文件进行ASR转写 - answer_id: {answer_id}, audio_path: {audio_path}")
+            asr_service = XunfeiASRService(audio_path)
+            transcribed_text = asr_service.get_result()
+            if transcribed_text:
+                print(f"[调试] 音频转写成功 - answer_id: {answer_id}")
+                answer.answer = transcribed_text  # 用录音文件转写结果替换
+                answer.save()
+                print(f"[调试] 已更新数据库中的答案文本 - answer_id: {answer_id}")
+            else:
+                print(f"[调试] 音频转写失败 - answer_id: {answer_id}")
+        elif has_video and av_path and os.path.exists(av_path):
+            print(f"[调试] 只有视频文件，无法进行ASR转写 - answer_id: {answer_id}")
+            # 视频文件无法进行ASR转写，保持占位文本
+        else:
+            print(f"[调试] 无音频文件，无法进行ASR转写 - answer_id: {answer_id}")
         
-        # 获取问题知识点
+        # 第二步：获取问题知识点
         knowledge_points = answer.knowledge_points if hasattr(answer, 'knowledge_points') and answer.knowledge_points else []
         knowledge_points_str = "、".join(knowledge_points) if knowledge_points else "通用技能"
         
-        # 构建新的分析提示
+        # 第三步：构建分析提示（使用转写后的文本）
         prompt = f"""请根据以下面试问题和应答，从七个维度进行评分（1-5分）并给出分析理由：
 
 1. 专业知识水平：对专业领域的理解深度和广度
@@ -62,18 +79,18 @@ def analyze_interview_answer(answer_id, av_path=None):
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         )
         
-        # 构建消息内容
+        # 第四步：构建消息内容
         content = [{"type": "text", "text": prompt}]
         
-        # 如果有视频文件，添加为base64编码的内容用于多模态分析
-        # 注意：qwen-omni API只支持视频文件，不支持音频文件
-        if av_path and os.path.exists(av_path):
-            print(f"[调试] 检查音视频文件 - answer_id: {answer_id}, av_path: {av_path}")
-            
-            # 只处理视频文件(.mp4)，音频文件(.wav)不用于多模态分析
-            if av_path.endswith('.mp4'):
-                print(f"[调试] 添加视频文件到多模态分析 - answer_id: {answer_id}")
-                try:
+        # 第五步：如果有视频文件，添加为base64编码的内容用于多模态分析
+        if has_video and av_path and os.path.exists(av_path):
+            print(f"[调试] 添加视频文件到多模态分析 - answer_id: {answer_id}")
+            try:
+                # 检查视频文件大小，如果太大则跳过
+                file_size = os.path.getsize(av_path)
+                if file_size > 50 * 1024 * 1024:  # 50MB限制
+                    print(f"[警告] 视频文件过大({file_size/1024/1024:.1f}MB)，跳过多模态分析 - answer_id: {answer_id}")
+                else:
                     with open(av_path, "rb") as f:
                         video_bytes = f.read()
                     video_b64 = base64.b64encode(video_bytes).decode('utf-8')
@@ -85,15 +102,12 @@ def analyze_interview_answer(answer_id, av_path=None):
                         }
                     })
                     print(f"[调试] 视频文件已添加到多模态分析内容 - answer_id: {answer_id}")
-                except Exception as e:
-                    print(f"[警告] 添加视频文件失败 - answer_id: {answer_id}, error: {e}")
-            elif av_path.endswith('.wav'):
-                print(f"[调试] 音频文件不用于多模态分析，仅使用文本内容 - answer_id: {answer_id}")
-            else:
-                print(f"[调试] 不支持的文件类型，跳过多模态分析 - answer_id: {answer_id}, file: {av_path}")
+            except Exception as e:
+                print(f"[警告] 添加视频文件失败 - answer_id: {answer_id}, error: {e}")
         else:
-            print(f"[调试] 无音视频文件或文件不存在，仅进行文本分析 - answer_id: {answer_id}, av_path: {av_path}")
+            print(f"[调试] 无视频文件，仅进行文本分析 - answer_id: {answer_id}")
         
+        # 第六步：调用qwen-omni API进行多模态分析
         print(f"[调试] 调用 AI API - answer_id: {answer_id}")
         completion = client.chat.completions.create(
             model="qwen2.5-omni-7b",
@@ -110,7 +124,7 @@ def analyze_interview_answer(answer_id, av_path=None):
         print(f"[调试] AI 分析完成 - answer_id: {answer_id}")
         print("[调试] qwen2.5-omni-7b分析结果：", full_response)
         
-        # 从分析结果中提取分数
+        # 第七步：从分析结果中提取分数并更新数据库
         try:
             # 解析各个维度的分数
             scores = {
@@ -177,4 +191,4 @@ def analyze_interview_answer(answer_id, av_path=None):
         print(f"错误信息: {str(e)}")
         print("详细错误信息:")
         print(traceback.format_exc())
-        return False 
+        return False

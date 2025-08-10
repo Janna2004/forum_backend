@@ -22,7 +22,7 @@ import sys
 sys.path.append('./pytorch_model')
 from ultralytics import YOLO
 import requests
-from config.local_settings import QWEN_API_KEY
+from django.conf import settings
 import os
 import datetime
 import wave
@@ -80,7 +80,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             loop = asyncio.get_event_loop()
             self._ws_loop = loop
             def on_rtasr_result(text):
-                print('[RTASR回调]', text)
+                # print('[RTASR回调]', text)
                 asyncio.run_coroutine_threadsafe(self.handle_asr_result(text), loop)
             def start_rtasr():
                 retry_count = 0
@@ -88,7 +88,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 while retry_count < max_retries:
                     try:
                         print(f"[WebRTCConsumer] RTASR ws connecting... (尝试 {retry_count + 1}/{max_retries})")
-                        self.rtasr_client = XunfeiRTASRClient(app_id=settings.XUNFEI_APP_ID, api_key=settings.XUNFEI_ASR_API_KEY, on_result=on_rtasr_result)
+                        self.rtasr_client = XunfeiRTASRClient(app_id=settings.XUNFEI_APP_ID, api_key=settings.XUNFEI_RTASR_API_KEY, on_result=on_rtasr_result)
                         self.rtasr_client.connect()
                         print("[WebRTCConsumer] RTASR ws connected")
                         # 连接成功，发送通知
@@ -393,6 +393,10 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         try:
             frame_data = data.get('frame_data')
             frame_type = data.get('frame_type', 'keyframe')
+            
+            # 调试信息
+            #print(f"[调试] 收到视频帧 - frame_type: {frame_type}, frame_data长度: {len(frame_data) if frame_data else 0}")
+            
             if not frame_data:
                 await self.send(text_data=json.dumps({
                     'type': 'error',
@@ -453,7 +457,9 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             )
             if frame_data:
                 self.video_frame_buffer.append(frame_data)
+                #print(f"[调试] 视频帧已添加到buffer，当前buffer长度: {len(self.video_frame_buffer)}")
         except Exception as e:
+            print(f"[调试] 处理视频帧失败: {str(e)}")
             logger.error(f"处理视频帧失败: {str(e)}")
             await self.send(text_data=json.dumps({
                 'type': 'error',
@@ -466,6 +472,10 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         try:
             audio_data = data.get('audio_data')  # base64字符串
             is_end = data.get('end', False)
+            
+            # 调试信息
+            #print(f"[调试] 收到音频帧 - is_end: {is_end}, audio_data长度: {len(audio_data) if audio_data else 0}")
+            
             if is_end:
                 if self.rtasr_client and self.rtasr_client.connected and not self.rtasr_client.closed:
                     self.rtasr_client.send_audio(b'', is_last=True)
@@ -485,7 +495,9 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 pass
             if audio_data:
                 self.audio_buffer.append(audio_data)
+                # print(f"[调试] 音频数据已添加到buffer，当前buffer长度: {len(self.audio_buffer)}")
         except Exception as e:
+            print(f"[调试] 音频帧处理出错: {e}")
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'text': f'音频帧处理出错: {str(e)}'
@@ -669,8 +681,14 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 # 去除序号和空白
                 q = re.sub(r'^\d+\.\s*', '', q.strip())
                 if q:  # 忽略空行
-                    # 为每个问题生成知识点标注
-                    knowledge_points = self._generate_knowledge_points_for_question(q, position_type, kb_service)
+                    try:
+                        # 为每个问题生成知识点标注
+                        knowledge_points = self._generate_knowledge_points_for_question(q, position_type, kb_service)
+                    except Exception as e:
+                        print(f"[调试] 为问题生成知识点失败: {q[:50]}... 错误: {e}")
+                        # 知识点生成失败时使用默认知识点
+                        knowledge_points = self._generate_rule_based_knowledge_points(q, position_type)
+                    
                     processed_questions.append({
                         'question': q,
                         'knowledge_points': knowledge_points
@@ -739,46 +757,16 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         ]
     
     def _generate_knowledge_points_for_question(self, question, position_type, kb_service):
-        """使用讯飞模型为问题生成知识点标注"""
-        import re  # 在方法内部重新导入re模块
+        """使用规则为问题生成知识点标注"""
         try:
-            # 构建知识点标注提示词
-            prompt = f"""请为以下技术面试问题标注具体的知识点。要求知识点要非常具体和专业，比如"数据库事务ACID原则"、"HTTP协议状态码"、"React生命周期"等。
-
-问题：{question}
-岗位类型：{position_type}
-
-请列出这个问题可能涉及的3-6个具体知识点，每个知识点都要具体到技术细节。
-请直接输出知识点列表，每行一个，不要序号：
-"""
-            
-            # 调用讯飞模型生成知识点
-            knowledge_points_text = kb_service.generate_interview_questions(prompt)
-            
-            if knowledge_points_text:
-                # 解析知识点
-                knowledge_points = []
-                for line in knowledge_points_text.split('\n'):
-                    point = line.strip()
-                    # 去除可能的序号
-                    point = re.sub(r'^\d+\.\s*', '', point)
-                    point = re.sub(r'^[-•]\s*', '', point)
-                    if point and len(point) > 2:  # 过滤掉太短的文本
-                        knowledge_points.append(point)
-                
-                # 限制知识点数量
-                if len(knowledge_points) > 6:
-                    knowledge_points = knowledge_points[:6]
-                    
-                print(f"[调试] 问题知识点标注: {question} -> {knowledge_points}")
-                return knowledge_points
+            # 直接使用规则生成知识点，避免重复调用AI服务
+            knowledge_points = self._generate_rule_based_knowledge_points(question, position_type)
+            print(f"[调试] 问题知识点标注: {question[:50]}... -> {knowledge_points}")
+            return knowledge_points
             
         except Exception as e:
             print(f"[调试] 生成知识点失败: {str(e)}")
-            print(traceback.format_exc())
-        
-        # 如果生成失败，返回默认知识点
-        try:
+            # 返回默认知识点
             default_points_map = {
                 'backend': ["后端开发", "系统设计", "数据库", "API设计"],
                 'frontend': ["前端开发", "用户界面", "JavaScript", "框架应用"],
@@ -788,9 +776,53 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 'data': ["数据分析", "机器学习", "数据挖掘", "统计学"]
             }
             return default_points_map.get(position_type, ["专业技能", "问题解决", "逻辑思维"])
-        except Exception as default_e:
-            print(f"[调试] 获取默认知识点也失败: {str(default_e)}")
-            return ["通用技能", "专业能力", "沟通表达"]
+
+    def _generate_rule_based_knowledge_points(self, question, position_type):
+        """基于规则生成知识点，避免重复调用AI"""
+        knowledge_points = []
+        
+        # 根据问题内容匹配知识点
+        question_lower = question.lower()
+        
+        # 后端相关知识点
+        if any(keyword in question_lower for keyword in ['数据库', 'mysql', 'redis', 'mongodb']):
+            knowledge_points.extend(['数据库设计', 'SQL优化', '索引原理', '事务管理'])
+        if any(keyword in question_lower for keyword in ['并发', '高并发', '多线程']):
+            knowledge_points.extend(['并发编程', '线程安全', '锁机制', '性能优化'])
+        if any(keyword in question_lower for keyword in ['微服务', '分布式', '架构']):
+            knowledge_points.extend(['系统架构', '微服务设计', '分布式系统', '服务治理'])
+        if any(keyword in question_lower for keyword in ['spring', 'java', '框架']):
+            knowledge_points.extend(['Spring框架', 'Java核心', '设计模式', 'JVM调优'])
+        
+        # 前端相关知识点
+        if any(keyword in question_lower for keyword in ['react', 'vue', '前端', 'javascript']):
+            knowledge_points.extend(['前端框架', 'JavaScript', '组件化', '状态管理'])
+        if any(keyword in question_lower for keyword in ['性能', '优化']):
+            knowledge_points.extend(['性能优化', '代码质量', '最佳实践', '用户体验'])
+        
+        # 通用知识点
+        if any(keyword in question_lower for keyword in ['项目', '经验', '实践']):
+            knowledge_points.extend(['项目经验', '问题解决', '团队协作', '技术选型'])
+        if any(keyword in question_lower for keyword in ['学习', '技术', '能力']):
+            knowledge_points.extend(['学习能力', '技术栈', '自我提升', '专业素养'])
+        
+        # 去重并限制数量
+        knowledge_points = list(set(knowledge_points))[:6]
+        
+        # 如果知识点不够，补充默认的
+        if len(knowledge_points) < 3:
+            default_points = {
+                'backend': ['后端开发', '系统设计', '数据库'],
+                'frontend': ['前端开发', '用户界面', 'JavaScript'],
+                'algo': ['算法设计', '数据结构', '计算复杂度'],
+                'pm': ['产品设计', '用户需求', '项目管理'],
+                'qa': ['测试方法', '质量保证', '自动化测试'],
+                'data': ['数据分析', '机器学习', '数据挖掘']
+            }
+            knowledge_points.extend(default_points.get(position_type, ['专业技能', '问题解决']))
+            knowledge_points = list(set(knowledge_points))[:6]
+        
+        return knowledge_points
     
     async def handle_disconnect(self, data):
         """处理断开连接请求"""
@@ -855,13 +887,10 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             # 更新当前回答
             if self.phase == self.PHASE_INTRO or self.phase == self.PHASE_QUESTION:
                 if text:
-                    self.current_answer_sentences.append(text)
+                    # self.current_answer_sentences.append(text)
                     # 如果检测到说完了，保存答案
                     if "说完了" in text or "完毕" in text:
-                        print("[调试] handle_asr_result current_answer_final:", self.current_answer_final)
                         print("[调试] handle_asr_result 检测到说完了，准备保存答案")
-                        # 更新最终答案
-                        self.current_answer_final = self.current_answer_sentences
                         await self.save_current_answer()
                         await self.next_question()
                     
@@ -888,6 +917,8 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         await self.next_question()
 
     async def next_question(self):
+        print(f"[DEBUG] next_question called, question_queue length: {len(self.question_queue) if self.question_queue else 0}")
+        
         if self.question_queue:
             question_data = self.question_queue.pop(0)
             # 适配新的数据结构（可能是字典或字符串）
@@ -909,10 +940,11 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 'text': self.current_question
             }))
             self.phase = self.PHASE_QUESTION
-            # 新问题开始时清空buffer
-            self.audio_buffer = []
-            self.video_frame_buffer = []
+            # 注意：不再在这里清空buffer，而是在音视频处理完成后清空
+            print(f"[调试] 新问题开始，当前音频buffer长度: {len(self.audio_buffer) if hasattr(self, 'audio_buffer') else 0}")
+            print(f"[调试] 新问题开始，当前视频buffer长度: {len(self.video_frame_buffer) if hasattr(self, 'video_frame_buffer') else 0}")
         else:
+            print(f"[DEBUG] 问题队列为空，准备进入代码题阶段")
             # 保存最后一道题答案
             await self.save_current_answer()
             self.phase = self.PHASE_CODE
@@ -921,20 +953,24 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 'phase': self.PHASE_CODE,
                 'text': '问答环节结束，下面进入代码题环节。'
             }))
+            print(f"[DEBUG] 准备调用 start_coding_problems")
             # 开始代码题阶段
             await self.start_coding_problems()
+            print(f"[DEBUG] start_coding_problems 调用完成")
 
     async def save_current_answer(self):
         """保存当前问题的答案"""
         print("[调试] save_current_answer called, current_question:", self.current_question)
-        print("[调试] save_current_answer called, current_answer_final:", self.current_answer_final)
+        
         if not self.video_stream:
             print("[调试] save_current_answer异常: video_stream 未初始化")
             return
-        if self.current_question and self.current_answer_final:
-            # 将列表中的答案合并为完整文本
-            answer_text = '\n'.join(self.current_answer_final)
+            
+        if self.current_question:
+            # 不依赖实时转写内容，答案文本将通过音频文件转写获得
+            answer_text = "[答案内容将通过音频文件转写获得]"
             print("[调试] answer_text:", answer_text)
+            
             try:
                 from interviews.models import Interview, InterviewAnswer
                 # 获取面试记录
@@ -947,14 +983,14 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                     interview=interview,
                     user=self.user,
                     question=self.current_question,
-                    answer=answer_text,
-                    knowledge_points=knowledge_points  # 保存知识点
+                    answer=answer_text,  # 临时占位，后续会被音频转写结果替换
+                    knowledge_points=knowledge_points
                 )
                 
                 print(f"[调试] 已保存答案记录，知识点: {knowledge_points}")
                 
                 # 异步处理音视频片段，避免阻塞 ASR
-                av_path = None
+                # 注意：不在这里创建AI分析任务，等待音频转写完成后再创建
                 try:
                     # 创建异步任务处理音视频
                     asyncio.create_task(self._async_save_av_clip(answer.id))
@@ -962,15 +998,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 except Exception as av_error:
                     print(f"[警告] 异步音视频任务创建失败: {av_error}")
                 
-                # 将分析任务加入队列（不依赖音视频路径）
-                try:
-                    from interviews.tasks import analyze_interview_answer
-                    await database_sync_to_async(analyze_interview_answer.delay)(str(answer.id), None)  # 先传 None，后续更新
-                    print(f"[调试] 已创建答案记录并加入分析队列 - id: {answer.id}")
-                except Exception as task_error:
-                    print(f"[警告] 分析任务创建失败: {task_error}")
-                
-                # 清空当前问题和答案
+                # 清空当前问题和答案（但不清空buffer，等音视频处理完成后再清空）
                 self.current_question = None
                 self.current_question_knowledge_points = []
                 self.current_answer_final = []
@@ -987,22 +1015,41 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             # 使用线程池处理音视频合成，避免阻塞事件循环
             loop = asyncio.get_event_loop()
             with ThreadPoolExecutor() as executor:
-                av_path = await loop.run_in_executor(executor, self._sync_save_av_clip)
+                result = await loop.run_in_executor(executor, self._sync_save_av_clip)
             
-            print(f"[调试] 异步音视频保存成功: {av_path}")
+            print(f"[调试] 异步音视频保存成功: {result}")
             
-            # 直接重新触发分析任务，这次带上音视频路径
-            if av_path:
+            # 根据保存的文件类型决定分析策略
+            if result['av_path']:
                 try:
                     from interviews.tasks import analyze_interview_answer
-                    await database_sync_to_async(analyze_interview_answer.delay)(str(answer_id), av_path)
-                    print(f"[调试] 已重新创建带音视频的分析任务 - id: {answer_id}, av_path: {av_path}")
-                except Exception as task_error:
-                    print(f"[警告] 重新创建分析任务失败: {task_error}")
                     
+                    # 传递详细信息给分析任务
+                    await database_sync_to_async(analyze_interview_answer.delay)(
+                        str(answer_id), 
+                        result['av_path'],
+                        result['audio_path'],
+                        result['has_audio'],
+                        result['has_video']
+                    )
+                    print(f"[调试] 已创建分析任务 - id: {answer_id}, av_path: {result['av_path']}")
+                except Exception as task_error:
+                    print(f"[警告] 创建分析任务失败: {task_error}")
+            else:
+                print(f"[警告] 无音视频文件，跳过AI分析 - answer_id: {answer_id}")
+            
+            # 音视频处理完成后，清空buffer
+            self.audio_buffer = []
+            self.video_frame_buffer = []
+            print(f"[调试] 音视频处理完成，已清空buffer")
+                
         except Exception as e:
             print(f"[错误] 异步音视频处理失败: {e}")
             print(traceback.format_exc())
+            # 即使处理失败，也要清空buffer
+            self.audio_buffer = []
+            self.video_frame_buffer = []
+            print(f"[调试] 音视频处理失败，已清空buffer")
 
     def _sync_save_av_clip(self):
         """同步保存音视频片段（在线程池中运行）"""
@@ -1015,25 +1062,50 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         os.makedirs(img_dir, exist_ok=True)
         video_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_av.mp4')
 
+        # 调试信息：检查buffer状态
+        print(f"[调试] 音频buffer长度: {len(self.audio_buffer) if hasattr(self, 'audio_buffer') else 'None'}")
+        print(f"[调试] 视频buffer长度: {len(self.video_frame_buffer) if hasattr(self, 'video_frame_buffer') else 'None'}")
+        
+        if hasattr(self, 'audio_buffer') and self.audio_buffer:
+            print(f"[调试] 音频buffer第一个chunk长度: {len(self.audio_buffer[0]) if self.audio_buffer else 'N/A'}")
+            print(f"[调试] 音频buffer第一个chunk前50字符: {self.audio_buffer[0][:50] if self.audio_buffer else 'N/A'}")
+
         # 保存音频
         if self.audio_buffer:
             pcm_bytes = b''.join([base64.b64decode(chunk) for chunk in self.audio_buffer])
-            with wave.open(audio_path, 'wb') as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(16000)
-                wf.writeframes(pcm_bytes)
+            print(f"[调试] 解码后的音频数据长度: {len(pcm_bytes)} bytes")
+            
+            if len(pcm_bytes) > 0:
+                with wave.open(audio_path, 'wb') as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(16000)
+                    wf.writeframes(pcm_bytes)
+                audio_saved = True
+                print(f"[调试] 音频文件保存成功: {audio_path}")
+            else:
+                print(f"[调试] 警告：解码后的音频数据为空")
+                audio_path = None
+                audio_saved = False
         else:
             audio_path = None
+            audio_saved = False
+            print(f"[调试] 音频buffer为空")
 
         # 保存视频帧
         img_paths = []
         if self.video_frame_buffer:
+            print(f"[调试] 开始保存视频帧，共{len(self.video_frame_buffer)}帧")
             for i, b64img in enumerate(self.video_frame_buffer):
                 img_path = os.path.join(img_dir, f'frame_{i:04d}.jpg')
                 with open(img_path, 'wb') as f:
                     f.write(base64.b64decode(b64img))
                 img_paths.append(img_path)
+            video_saved = True
+            print(f"[调试] 视频帧保存成功，共{len(img_paths)}帧")
+        else:
+            video_saved = False
+            print(f"[调试] 视频buffer为空")
 
         # 合成带声mp4
         try:
@@ -1048,6 +1120,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             
             if ffmpeg_available:
                 if audio_path and img_paths:
+                    print(f"[调试] 开始合成音视频文件")
                     video_stream = ffmpeg.input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
                     audio_stream = ffmpeg.input(audio_path)
                     (
@@ -1056,11 +1129,18 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                         .run(overwrite_output=True)
                     )
                     av_path = video_path
+                    has_audio = True
+                    has_video = True
+                    print(f"[调试] 音视频合成成功: {video_path}")
                 elif audio_path:
                     av_path = audio_path
+                    has_audio = True
+                    has_video = False
+                    print(f"[调试] 只有音频文件: {audio_path}")
                 elif img_paths:
                     # 只合成无声视频
                     video_only_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_video.mp4')
+                    print(f"[调试] 开始合成无声视频")
                     (
                         ffmpeg
                         .input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
@@ -1068,12 +1148,21 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                         .run(overwrite_output=True)
                     )
                     av_path = video_only_path
+                    has_audio = False
+                    has_video = True
+                    print(f"[调试] 无声视频合成成功: {video_only_path}")
                 else:
                     av_path = None
+                    has_audio = False
+                    has_video = False
+                    print(f"[调试] 无音视频数据")
             else:
                 # ffmpeg不可用时，只保存音频或图片
                 if audio_path:
                     av_path = audio_path
+                    has_audio = True
+                    has_video = False
+                    print(f"[调试] ffmpeg不可用，使用音频文件: {audio_path}")
                 elif img_paths:
                     # 保存第一张图片作为代表
                     import shutil
@@ -1082,16 +1171,28 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                         img_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_image.jpg')
                         shutil.copy2(first_img, img_path)
                         av_path = img_path
+                        has_audio = False
+                        has_video = False
+                        print(f"[调试] ffmpeg不可用，保存图片: {img_path}")
                     else:
                         av_path = None
+                        has_audio = False
+                        has_video = False
+                        print(f"[调试] ffmpeg不可用，无图片可保存")
                 else:
                     av_path = None
+                    has_audio = False
+                    has_video = False
+                    print(f"[调试] ffmpeg不可用，无音视频数据")
                     
         except Exception as e:
             print(f"[错误] 音视频合成失败: {e}")
             # 出错时，尝试保存音频或图片
             if audio_path:
                 av_path = audio_path
+                has_audio = True
+                has_video = False
+                print(f"[调试] 合成失败，使用音频文件: {audio_path}")
             elif img_paths:
                 # 保存第一张图片作为代表
                 try:
@@ -1106,11 +1207,25 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 except Exception as img_error:
                     print(f"[错误] 保存图片失败: {img_error}")
                     av_path = None
+                    has_audio = False
+                    has_video = False
             else:
                 av_path = None
-
+                has_audio = False
+                has_video = False
+                print(f"[调试] 合成失败，无音视频数据")
+        
         self.current_question_idx = q_idx + 1
-        return av_path
+        
+        # 返回详细信息
+        result = {
+            'av_path': av_path,
+            'audio_path': audio_path if has_audio else None,
+            'has_audio': has_audio,
+            'has_video': has_video
+        }
+        print(f"[调试] 返回结果: {result}")
+        return result
 
     async def finish_interview(self):
         """结束面试"""
@@ -1252,7 +1367,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         prompt = f"请根据以下面试问题和应答，判断应答者在回答时的信心和表达流畅度，并按如下标准打1-5分：\\n1分：极度缺乏信心，表达极不流畅，长时间停顿或语无伦次。\\n2分：信心不足，表达有明显卡顿或多次重复、犹豫。\\n3分：信心一般，表达基本流畅但偶有停顿或语气不坚定。\\n4分：信心较强，表达流畅，偶有小瑕疵。\\n5分：非常有信心，表达极其流畅，思路清晰、语气坚定。\\n请输出分析理由和分数。\\n\\n面试问题：{question}\\n应答内容：{answer_text}"
         try:
             client = OpenAI(
-                api_key=QWEN_API_KEY,
+                api_key=settings.QWEN_API_KEY,
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             )
             
@@ -1389,12 +1504,16 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     
     async def start_coding_problems(self):
         """开始代码题环节"""
+        print(f"[DEBUG] start_coding_problems called")
         try:
             # 获取面试和简历信息
             interview = await self.get_interview_by_id(self.interview_id)
             resume = await self.get_resume_by_id(self.resume_id)
             
+            print(f"[DEBUG] 获取到面试: {interview}, 简历: {resume}")
+            
             if not interview or not resume:
+                print("[DEBUG] 无法获取面试或简历信息")
                 await self.send(text_data=json.dumps({
                     'type': 'error',
                     'text': '无法获取面试或简历信息'
@@ -1404,11 +1523,13 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             # 使用代码题选择服务选择合适的题目
             from interviews.services import CodingProblemService
             coding_service = CodingProblemService()
+            print(f"[DEBUG] 初始化代码题服务: {coding_service}")
             self.coding_problems = await database_sync_to_async(
                 coding_service.select_problems_for_interview
             )(interview, resume, limit=3)
-            
+            print(f"[DEBUG] 选择代码题: {self.coding_problems}")
             if not self.coding_problems:
+                print("[DEBUG] 没有找到合适的代码题")
                 await self.send(text_data=json.dumps({
                     'type': 'interview_message',
                     'phase': self.PHASE_CODE,
@@ -1416,11 +1537,14 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 }))
                 return
             
+            print(f"[DEBUG] 准备开始第一道代码题")
             # 开始第一道代码题
             await self.start_next_coding_problem()
+            print(f"[DEBUG] start_next_coding_problem 调用完成")
             
         except Exception as e:
             print(f"[DEBUG] start_coding_problems error: {e}")
+            print(traceback.format_exc())
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'text': f'代码题加载失败: {str(e)}'
@@ -1428,7 +1552,11 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
     
     async def start_next_coding_problem(self):
         """开始下一道代码题"""
+        print(f"[DEBUG] start_next_coding_problem called, coding_problems: {self.coding_problems}")
+        print(f"[DEBUG] WebSocket连接状态: {self.channel_name}")
+        
         if not self.coding_problems:
+            print("[DEBUG] 没有更多代码题，面试结束")
             # 面试全部结束
             await self.send(text_data=json.dumps({
                 'type': 'interview_message',
@@ -1440,32 +1568,48 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         
         # 取出下一道题
         self.current_coding_problem = self.coding_problems.pop(0)
+        print(f"[DEBUG] 当前代码题: {self.current_coding_problem}")
+        print(f"[DEBUG] 代码题ID: {self.current_coding_problem.id}")
+        print(f"[DEBUG] 代码题标题: {self.current_coding_problem.title}")
         
-        # 获取第一个样例
-        first_example = await database_sync_to_async(
-            lambda: self.current_coding_problem.examples.first()
-        )()
-        
-        # 构造代码题信息
-        problem_data = {
-            'type': 'coding_problem',
-            'phase': self.PHASE_CODE,
-            'problem': {
-                'id': self.current_coding_problem.id,
-                'number': self.current_coding_problem.number,
-                'title': self.current_coding_problem.title,
-                'description': self.current_coding_problem.description,
-                'difficulty': self.current_coding_problem.difficulty,
-                'tags': self.current_coding_problem.tags,
-                'example': {
-                    'input': first_example.input_data if first_example else '',
-                    'output': first_example.output_data if first_example else '',
-                    'explanation': first_example.explanation if first_example else ''
-                } if first_example else None
+        try:
+            # 获取第一个样例
+            print(f"[DEBUG] 准备获取第一个样例")
+            first_example = await database_sync_to_async(
+                lambda: self.current_coding_problem.examples.first()
+            )()
+            print(f"[DEBUG] 第一个样例: {first_example}")
+            
+            # 构造代码题信息
+            problem_data = {
+                'type': 'coding_problem',
+                'phase': self.PHASE_CODE,
+                'problem': {
+                    'id': self.current_coding_problem.id,
+                    'number': self.current_coding_problem.number,
+                    'title': self.current_coding_problem.title,
+                    'description': self.current_coding_problem.description,
+                    'difficulty': self.current_coding_problem.difficulty,
+                    'tags': self.current_coding_problem.tags,
+                    'example': {
+                        'input': first_example.input_data if first_example else '',
+                        'output': first_example.output_data if first_example else '',
+                        'explanation': first_example.explanation if first_example else ''
+                    } if first_example else None
+                }
             }
-        }
-        
-        await self.send(text_data=json.dumps(problem_data))
+            
+            print(f"[DEBUG] 准备发送代码题数据: {problem_data}")
+            await self.send(text_data=json.dumps(problem_data))
+            print(f"[DEBUG] 代码题数据发送成功")
+            
+        except Exception as e:
+            print(f"[DEBUG] start_next_coding_problem error: {e}")
+            print(traceback.format_exc())
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'text': f'代码题加载失败: {str(e)}'
+            }))
     
     async def handle_request_next_coding_problem(self):
         """处理请求下一道代码题"""

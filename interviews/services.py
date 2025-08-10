@@ -40,7 +40,7 @@ class XunfeiRealtimeTranscribeClient:
         import hashlib, base64, time
         from django.conf import settings
         self.appid = getattr(settings, 'XUNFEI_APP_ID', '')
-        self.api_key = getattr(settings, 'XUNFEI_ASR_API_KEY', '')
+        self.api_key = getattr(settings, 'XUNFEI_RTASR_API_KEY', '')
         self.on_result = on_result
         self.ws = None
         self.thread = None
@@ -55,8 +55,9 @@ class XunfeiRealtimeTranscribeClient:
         ts = str(int(time.time()))
         md5 = hashlib.md5((appid + ts).encode('utf-8')).hexdigest()
         signa = base64.b64encode(hashlib.sha1((md5 + api_key).encode('utf-8')).digest()).decode('utf-8')
+        lang = 'cn'
         print(f"调试: appid={appid}, api_key={api_key}, ts={ts}, signa={signa}")
-        url = f"wss://rtasr.xfyun.cn/v1/ws?appid={appid}&ts={ts}&signa={signa}"
+        url = f"wss://rtasr.xfyun.cn/v1/ws?appid={appid}&ts={ts}&signa={signa}&lang={lang}"
         return url
 
     def connect(self):
@@ -204,7 +205,7 @@ class XunfeiTranscriptionService:
         self.APPID = settings.XUNFEI_APP_ID
         self.Algorithm = "hmac-sha256"
         self.HttpProto = "HTTP/1.1"
-        self.UserName = settings.XUNFEI_API_KEY
+        self.UserName = settings.XUNFEI_ASR_API_KEY
         self.Secret = settings.XUNFEI_API_SECRET
         
         # 业务参数
@@ -373,7 +374,7 @@ class XunfeiASRService:
         self.api_upload = '/upload'
         self.api_get_result = '/getResult'
         self.appid = settings.XUNFEI_APP_ID
-        self.secret_key = settings.XUNFEI_ASR_API_KEY#XUNFEI_SECRET_KEY
+        self.secret_key = settings.XUNFEI_ASR_API_KEY
         self.file_path = file_path
         self.ts = str(int(time.time()))
         self.signa = self.get_signa()
@@ -501,7 +502,7 @@ class FileUploadService:
         self.file_piece_size = 5242880  # 5MB
         
         self.app_id = settings.XUNFEI_APP_ID
-        self.api_key = settings.XUNFEI_API_KEY
+        self.api_key = settings.XUNFEI_ASR_API_KEY
         self.api_secret = settings.XUNFEI_API_SECRET
         self.request_id = self.get_request_id()
         self.cloud_id = '0'
@@ -822,6 +823,28 @@ class InterviewEvaluationService:
             # 生成总结
             summary = self._generate_summary(interview, answers, scores, knowledge_points)
             
+            # 获取每个问题的AI分析详情
+            question_analyses = []
+            for answer in answers:
+                question_analyses.append({
+                    'question': answer.question,
+                    'answer': answer.answer,
+                    'ai_analysis': answer.ai_analysis,
+                    'knowledge_points': answer.knowledge_points,
+                    # 'scores': {
+                    #     'professional_knowledge': answer.professional_knowledge,
+                    #     'skill_matching': answer.skill_matching,
+                    #     'communication_skills': answer.communication_skills,
+                    #     'logical_thinking': answer.logical_thinking,
+                    #     'innovation_ability': answer.innovation_ability,
+                    #     'stress_handling': answer.stress_handling,
+                    #     'correctness_score': answer.correctness_score
+                    # },
+                    # 'created_at': answer.created_at.isoformat() if answer.created_at else None
+                })
+            
+
+            
             return {
                 'radar': {
                     'data': {
@@ -845,7 +868,8 @@ class InterviewEvaluationService:
                 },
                 'score': total_score,
                 'lastCompare': last_compare,
-                'summary': summary
+                'summary': summary,
+                'question_analyses': question_analyses
             }
             
         except Interview.DoesNotExist:
@@ -981,6 +1005,10 @@ class InterviewEvaluationService:
     def _generate_summary(self, interview, answers, scores, knowledge_points):
         """生成面试总结"""
         try:
+            print(f"[调试] 开始生成STAR分析，面试岗位: {interview.position_name}")
+            print(f"[调试] 面试表现总分: {sum(scores)/len(scores):.1f}分")
+            print(f"[调试] 涉及知识点: {', '.join(knowledge_points.keys())}")
+            
             # 构建STAR结构
             star_prompt = f"""请根据以下面试信息，生成一个简短的STAR结构总结：
 
@@ -994,7 +1022,10 @@ class InterviewEvaluationService:
 3. 突出技术亮点
 4. 总字数不超过100字
 """
+            print(f"[调试] STAR提示词: {star_prompt}")
+            
             star_structure = self.spark_service._send_message(star_prompt)
+            print(f"[调试] STAR分析结果: {star_structure}")
             
             # 生成技术总结
             tech_prompt = f"""请根据以下面试信息，生成一句技术能力总结：
@@ -1008,7 +1039,23 @@ class InterviewEvaluationService:
 2. 突出技术特点和进步
 3. 语气要积极专业
 """
+            print(f"[调试] 技术总结提示词: {tech_prompt}")
+            
             technical_summary = self.spark_service._send_message(tech_prompt)
+            print(f"[调试] 技术总结结果: {technical_summary}")
+            
+            # 检查返回结果
+            if not star_structure or star_structure.strip() == "":
+                print("[调试] STAR分析返回空结果，使用默认值")
+                star_structure = None
+            else:
+                print(f"[调试] STAR分析成功，长度: {len(star_structure)}")
+                
+            if not technical_summary or technical_summary.strip() == "":
+                print("[调试] 技术总结返回空结果，使用默认值")
+                technical_summary = None
+            else:
+                print(f"[调试] 技术总结成功，长度: {len(technical_summary)}")
             
             return {
                 'starStructure': star_structure.strip() if star_structure else 'S: 遇到系统设计题；T: 需要高并发分析；A: 正确使用缓存和分布式锁；R: 得到面试官好评。',
@@ -1016,7 +1063,9 @@ class InterviewEvaluationService:
             }
             
         except Exception as e:
-            print(f"生成面试总结出错: {e}")
+            print(f"[调试] 生成面试总结出错: {e}")
+            import traceback
+            print(f"[调试] 错误详情: {traceback.format_exc()}")
             return {
                 'starStructure': 'S: 遇到系统设计题；T: 需要高并发分析；A: 正确使用缓存和分布式锁；R: 得到面试官好评。',
                 'technicalSummary': '系统设计能力进步明显，表达清晰。'

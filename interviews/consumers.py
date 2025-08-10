@@ -21,7 +21,7 @@ import sys
 sys.path.append('./pytorch_model')
 from ultralytics import YOLO
 import requests
-from config.local_settings import QWEN_API_KEY
+from django.conf import settings
 import os
 import datetime
 import wave
@@ -69,12 +69,12 @@ class InterviewConsumer(AsyncWebsocketConsumer):
             loop = asyncio.get_event_loop()
             self._ws_loop = loop
             def on_rtasr_result(text):
-                print('[RTASR回调]', text)
+                # print('[RTASR回调]', text)
                 asyncio.run_coroutine_threadsafe(self.handle_asr_result(text), loop)
             def start_rtasr():
                 try:
                     print("[InterviewConsumer] RTASR ws connecting...")
-                    self.rtasr_client = XunfeiRTASRClient(app_id=settings.XUNFEI_APP_ID, api_key=settings.XUNFEI_ASR_API_KEY, on_result=on_rtasr_result)
+                    self.rtasr_client = XunfeiRTASRClient(app_id=settings.XUNFEI_APP_ID, api_key=settings.XUNFEI_RTASR_API_KEY, on_result=on_rtasr_result)
                     self.rtasr_client.connect()
                     print("[InterviewConsumer] RTASR ws connected")
                 except Exception as e:
@@ -507,7 +507,7 @@ class InterviewConsumer(AsyncWebsocketConsumer):
         prompt = f"请根据以下面试问题和应答，判断应答者在回答时的信心和表达流畅度，并按如下标准打1-5分：\\n1分：极度缺乏信心，表达极不流畅，长时间停顿或语无伦次。\\n2分：信心不足，表达有明显卡顿或多次重复、犹豫。\\n3分：信心一般，表达基本流畅但偶有停顿或语气不坚定。\\n4分：信心较强，表达流畅，偶有小瑕疵。\\n5分：非常有信心，表达极其流畅，思路清晰、语气坚定。\\n请输出分析理由和分数。\\n\\n面试问题：{question}\\n应答内容：{answer_text}"
         try:
             client = OpenAI(
-                api_key=QWEN_API_KEY,
+                api_key=settings.QWEN_API_KEY,
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             )
             
