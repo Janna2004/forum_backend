@@ -33,6 +33,7 @@ from openai import OpenAI
 import traceback
 import re
 from concurrent.futures import ThreadPoolExecutor
+from django.conf import settings
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -87,7 +88,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 while retry_count < max_retries:
                     try:
                         print(f"[WebRTCConsumer] RTASR ws connecting... (尝试 {retry_count + 1}/{max_retries})")
-                        self.rtasr_client = XunfeiRTASRClient(app_id='08425c8a', api_key='c64481ae5aac8c1ad9993125c7a6fdbc', on_result=on_rtasr_result)
+                        self.rtasr_client = XunfeiRTASRClient(app_id=settings.XUNFEI_APP_ID, api_key=settings.XUNFEI_ASR_API_KEY, on_result=on_rtasr_result)
                         self.rtasr_client.connect()
                         print("[WebRTCConsumer] RTASR ws connected")
                         # 连接成功，发送通知

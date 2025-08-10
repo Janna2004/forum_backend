@@ -74,7 +74,7 @@ class InterviewConsumer(AsyncWebsocketConsumer):
             def start_rtasr():
                 try:
                     print("[InterviewConsumer] RTASR ws connecting...")
-                    self.rtasr_client = XunfeiRTASRClient(app_id='08425c8a', api_key='c64481ae5aac8c1ad9993125c7a6fdbc', on_result=on_rtasr_result)
+                    self.rtasr_client = XunfeiRTASRClient(app_id=settings.XUNFEI_APP_ID, api_key=settings.XUNFEI_ASR_API_KEY, on_result=on_rtasr_result)
                     self.rtasr_client.connect()
                     print("[InterviewConsumer] RTASR ws connected")
                 except Exception as e:
