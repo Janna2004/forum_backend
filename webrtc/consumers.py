@@ -32,6 +32,7 @@ from requests_toolbelt.multipart.encoder import MultipartEncoder
 from openai import OpenAI
 import traceback
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -951,13 +952,22 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 
                 print(f"[调试] 已保存答案记录，知识点: {knowledge_points}")
                 
-                # 保存音视频片段
-                av_path = await self.save_av_clip_for_question()
+                # 异步处理音视频片段，避免阻塞 ASR
+                av_path = None
+                try:
+                    # 创建异步任务处理音视频
+                    asyncio.create_task(self._async_save_av_clip(answer.id))
+                    print(f"[调试] 已创建异步音视频处理任务 - answer_id: {answer.id}")
+                except Exception as av_error:
+                    print(f"[警告] 异步音视频任务创建失败: {av_error}")
                 
-                # 将分析任务加入队列
-                from interviews.tasks import analyze_interview_answer
-                await database_sync_to_async(analyze_interview_answer.delay)(str(answer.id), av_path)
-                print(f"[调试] 已创建答案记录并加入分析队列 - id: {answer.id}, av_path: {av_path}")
+                # 将分析任务加入队列（不依赖音视频路径）
+                try:
+                    from interviews.tasks import analyze_interview_answer
+                    await database_sync_to_async(analyze_interview_answer.delay)(str(answer.id), None)  # 先传 None，后续更新
+                    print(f"[调试] 已创建答案记录并加入分析队列 - id: {answer.id}")
+                except Exception as task_error:
+                    print(f"[警告] 分析任务创建失败: {task_error}")
                 
                 # 清空当前问题和答案
                 self.current_question = None
@@ -969,6 +979,137 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             except Exception as e:
                 print(f"[调试] save_current_answer错误: {e}")
                 print(traceback.format_exc())
+
+    async def _async_save_av_clip(self, answer_id):
+        """异步保存音视频片段"""
+        try:
+            # 使用线程池处理音视频合成，避免阻塞事件循环
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as executor:
+                av_path = await loop.run_in_executor(executor, self._sync_save_av_clip)
+            
+            print(f"[调试] 异步音视频保存成功: {av_path}")
+            
+            # 直接重新触发分析任务，这次带上音视频路径
+            if av_path:
+                try:
+                    from interviews.tasks import analyze_interview_answer
+                    await database_sync_to_async(analyze_interview_answer.delay)(str(answer_id), av_path)
+                    print(f"[调试] 已重新创建带音视频的分析任务 - id: {answer_id}, av_path: {av_path}")
+                except Exception as task_error:
+                    print(f"[警告] 重新创建分析任务失败: {task_error}")
+                    
+        except Exception as e:
+            print(f"[错误] 异步音视频处理失败: {e}")
+            print(traceback.format_exc())
+
+    def _sync_save_av_clip(self):
+        """同步保存音视频片段（在线程池中运行）"""
+        save_dir = './interview_clips'
+        os.makedirs(save_dir, exist_ok=True)
+        q_idx = getattr(self, 'current_question_idx', 0)
+        session_id = getattr(self, 'session_id', 'unknown')
+        audio_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}.wav')
+        img_dir = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_frames')
+        os.makedirs(img_dir, exist_ok=True)
+        video_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_av.mp4')
+
+        # 保存音频
+        if self.audio_buffer:
+            pcm_bytes = b''.join([base64.b64decode(chunk) for chunk in self.audio_buffer])
+            with wave.open(audio_path, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(pcm_bytes)
+        else:
+            audio_path = None
+
+        # 保存视频帧
+        img_paths = []
+        if self.video_frame_buffer:
+            for i, b64img in enumerate(self.video_frame_buffer):
+                img_path = os.path.join(img_dir, f'frame_{i:04d}.jpg')
+                with open(img_path, 'wb') as f:
+                    f.write(base64.b64decode(b64img))
+                img_paths.append(img_path)
+
+        # 合成带声mp4
+        try:
+            # 检查ffmpeg是否可用
+            import subprocess
+            try:
+                subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+                ffmpeg_available = True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                ffmpeg_available = False
+                print("[警告] ffmpeg未安装或不在PATH中，跳过音视频合成")
+            
+            if ffmpeg_available:
+                if audio_path and img_paths:
+                    video_stream = ffmpeg.input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
+                    audio_stream = ffmpeg.input(audio_path)
+                    (
+                        ffmpeg
+                        .output(video_stream, audio_stream, video_path, vcodec='libx264', acodec='aac', pix_fmt='yuv420p', shortest=None)
+                        .run(overwrite_output=True)
+                    )
+                    av_path = video_path
+                elif audio_path:
+                    av_path = audio_path
+                elif img_paths:
+                    # 只合成无声视频
+                    video_only_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_video.mp4')
+                    (
+                        ffmpeg
+                        .input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
+                        .output(video_only_path, vcodec='libx264', pix_fmt='yuv420p')
+                        .run(overwrite_output=True)
+                    )
+                    av_path = video_only_path
+                else:
+                    av_path = None
+            else:
+                # ffmpeg不可用时，只保存音频或图片
+                if audio_path:
+                    av_path = audio_path
+                elif img_paths:
+                    # 保存第一张图片作为代表
+                    import shutil
+                    first_img = os.path.join(img_dir, 'frame_0001.jpg')
+                    if os.path.exists(first_img):
+                        img_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_image.jpg')
+                        shutil.copy2(first_img, img_path)
+                        av_path = img_path
+                    else:
+                        av_path = None
+                else:
+                    av_path = None
+                    
+        except Exception as e:
+            print(f"[错误] 音视频合成失败: {e}")
+            # 出错时，尝试保存音频或图片
+            if audio_path:
+                av_path = audio_path
+            elif img_paths:
+                # 保存第一张图片作为代表
+                try:
+                    import shutil
+                    first_img = os.path.join(img_dir, 'frame_0001.jpg')
+                    if os.path.exists(first_img):
+                        img_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_image.jpg')
+                        shutil.copy2(first_img, img_path)
+                        av_path = img_path
+                    else:
+                        av_path = None
+                except Exception as img_error:
+                    print(f"[错误] 保存图片失败: {img_error}")
+                    av_path = None
+            else:
+                av_path = None
+
+        self.current_question_idx = q_idx + 1
+        return av_path
 
     async def finish_interview(self):
         """结束面试"""
@@ -1030,29 +1171,78 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 img_paths.append(img_path)
 
         # 合成带声mp4
-        if audio_path and img_paths:
-            video_stream = ffmpeg.input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
-            audio_stream = ffmpeg.input(audio_path)
-            (
-                ffmpeg
-                .output(video_stream, audio_stream, video_path, vcodec='libx264', acodec='aac', pix_fmt='yuv420p', shortest=None)
-                .run(overwrite_output=True)
-            )
-            av_path = video_path
-        elif audio_path:
-            av_path = audio_path
-        elif img_paths:
-            # 只合成无声视频
-            video_only_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_video.mp4')
-            (
-                ffmpeg
-                .input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
-                .output(video_only_path, vcodec='libx264', pix_fmt='yuv420p')
-                .run(overwrite_output=True)
-            )
-            av_path = video_only_path
-        else:
-            av_path = None
+        try:
+            # 检查ffmpeg是否可用
+            import subprocess
+            try:
+                subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+                ffmpeg_available = True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                ffmpeg_available = False
+                print("[警告] ffmpeg未安装或不在PATH中，跳过音视频合成")
+            
+            if ffmpeg_available:
+                if audio_path and img_paths:
+                    video_stream = ffmpeg.input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
+                    audio_stream = ffmpeg.input(audio_path)
+                    (
+                        ffmpeg
+                        .output(video_stream, audio_stream, video_path, vcodec='libx264', acodec='aac', pix_fmt='yuv420p', shortest=None)
+                        .run(overwrite_output=True)
+                    )
+                    av_path = video_path
+                elif audio_path:
+                    av_path = audio_path
+                elif img_paths:
+                    # 只合成无声视频
+                    video_only_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_video.mp4')
+                    (
+                        ffmpeg
+                        .input(os.path.join(img_dir, 'frame_%04d.jpg'), framerate=1)
+                        .output(video_only_path, vcodec='libx264', pix_fmt='yuv420p')
+                        .run(overwrite_output=True)
+                    )
+                    av_path = video_only_path
+                else:
+                    av_path = None
+            else:
+                # ffmpeg不可用时，只保存音频或图片
+                if audio_path:
+                    av_path = audio_path
+                elif img_paths:
+                    # 保存第一张图片作为代表
+                    import shutil
+                    first_img = os.path.join(img_dir, 'frame_0001.jpg')
+                    if os.path.exists(first_img):
+                        img_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_image.jpg')
+                        shutil.copy2(first_img, img_path)
+                        av_path = img_path
+                    else:
+                        av_path = None
+                else:
+                    av_path = None
+                    
+        except Exception as e:
+            print(f"[错误] 音视频合成失败: {e}")
+            # 出错时，尝试保存音频或图片
+            if audio_path:
+                av_path = audio_path
+            elif img_paths:
+                # 保存第一张图片作为代表
+                try:
+                    import shutil
+                    first_img = os.path.join(img_dir, 'frame_0001.jpg')
+                    if os.path.exists(first_img):
+                        img_path = os.path.join(save_dir, f'{session_id}_q{q_idx+1}_image.jpg')
+                        shutil.copy2(first_img, img_path)
+                        av_path = img_path
+                    else:
+                        av_path = None
+                except Exception as img_error:
+                    print(f"[错误] 保存图片失败: {img_error}")
+                    av_path = None
+            else:
+                av_path = None
 
         self.current_question_idx = q_idx + 1
         return av_path

@@ -3,7 +3,6 @@ from django.conf import settings
 import base64
 from openai import OpenAI
 from .models import InterviewAnswer
-from .services import XunfeiASRService
 import traceback
 import os
 import time
@@ -17,17 +16,9 @@ def analyze_interview_answer(answer_id, av_path=None):
         answer = InterviewAnswer.objects.get(id=answer_id)
         print(f"[调试] 成功获取答案记录 - answer_id: {answer_id}")
         
-        # 如果有音频文件，先进行转写
-        if av_path and os.path.exists(av_path):
-            print(f"[调试] 开始处理音频文件 - answer_id: {answer_id}")
-            asr_service = XunfeiASRService(av_path)
-            transcribed_text = asr_service.get_result()
-            if transcribed_text:
-                print(f"[调试] 音频转写成功 - answer_id: {answer_id}")
-                answer.answer = transcribed_text
-                answer.save()
-            else:
-                print(f"[调试] 音频转写失败 - answer_id: {answer_id}")
+        # 注意：ASR转写已在面试过程中通过RTASR实时完成
+        # 答案文本已经保存，不需要再次转写音频文件
+        # 音视频文件仅用于qwen-omni的多模态分析（情感、表情、肢体语言等）
         
         # 获取问题知识点
         knowledge_points = answer.knowledge_points if hasattr(answer, 'knowledge_points') and answer.knowledge_points else []
@@ -74,11 +65,39 @@ def analyze_interview_answer(answer_id, av_path=None):
         # 构建消息内容
         content = [{"type": "text", "text": prompt}]
         
+        # 如果有视频文件，添加为base64编码的内容用于多模态分析
+        # 注意：qwen-omni API只支持视频文件，不支持音频文件
+        if av_path and os.path.exists(av_path):
+            print(f"[调试] 检查音视频文件 - answer_id: {answer_id}, av_path: {av_path}")
+            
+            # 只处理视频文件(.mp4)，音频文件(.wav)不用于多模态分析
+            if av_path.endswith('.mp4'):
+                print(f"[调试] 添加视频文件到多模态分析 - answer_id: {answer_id}")
+                try:
+                    with open(av_path, "rb") as f:
+                        video_bytes = f.read()
+                    video_b64 = base64.b64encode(video_bytes).decode('utf-8')
+                    
+                    content.append({
+                        "type": "video_url",
+                        "video_url": {
+                            "url": f"data:video/mp4;base64,{video_b64}"
+                        }
+                    })
+                    print(f"[调试] 视频文件已添加到多模态分析内容 - answer_id: {answer_id}")
+                except Exception as e:
+                    print(f"[警告] 添加视频文件失败 - answer_id: {answer_id}, error: {e}")
+            elif av_path.endswith('.wav'):
+                print(f"[调试] 音频文件不用于多模态分析，仅使用文本内容 - answer_id: {answer_id}")
+            else:
+                print(f"[调试] 不支持的文件类型，跳过多模态分析 - answer_id: {answer_id}, file: {av_path}")
+        else:
+            print(f"[调试] 无音视频文件或文件不存在，仅进行文本分析 - answer_id: {answer_id}, av_path: {av_path}")
+        
         print(f"[调试] 调用 AI API - answer_id: {answer_id}")
         completion = client.chat.completions.create(
             model="qwen2.5-omni-7b",
             messages=[{"role": "user", "content": content}],
-            modalities=["text"],
             stream=True
         )
         

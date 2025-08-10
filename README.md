@@ -54,9 +54,7 @@ python manage.py migrate
 
 ### 5. 启动服务
 
-> **注意：如需使用WebSocket（如WebRTC），必须用ASGI服务器启动，不能用`runserver`！**
-
-
+> **注意：如需使用WebSocket（如WebRTC），必须用ASGI服务器启动，不能用 `runserver`！**
 
 - 启动redis
 - 启动异步处理队列：celery -A config worker -l info --pool=solo
@@ -92,10 +90,13 @@ python manage.py runserver
 
 ### 快速开始
 
-1. **初始化知识库**
+1. **初始化数据库**
 
 ```bash
 python manage.py init_knowledge_base
+python manage.py import_nowcoder_data
+cd crawler/interview_experience
+python crawler_integrated.py
 ```
 
 2. **配置讯飞API**

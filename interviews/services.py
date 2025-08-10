@@ -373,7 +373,7 @@ class XunfeiASRService:
         self.api_upload = '/upload'
         self.api_get_result = '/getResult'
         self.appid = settings.XUNFEI_APP_ID
-        self.secret_key = settings.XUNFEI_SECRET_KEY
+        self.secret_key = settings.XUNFEI_ASR_API_KEY#XUNFEI_SECRET_KEY
         self.file_path = file_path
         self.ts = str(int(time.time()))
         self.signa = self.get_signa()
