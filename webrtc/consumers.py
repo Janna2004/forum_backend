@@ -79,34 +79,8 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             self.session_id = str(uuid.uuid4())
             loop = asyncio.get_event_loop()
             self._ws_loop = loop
-            def on_rtasr_result(text):
-                # print('[RTASR回调]', text)
-                asyncio.run_coroutine_threadsafe(self.handle_asr_result(text), loop)
-            def start_rtasr():
-                retry_count = 0
-                max_retries = 3
-                while retry_count < max_retries:
-                    try:
-                        print(f"[WebRTCConsumer] RTASR ws connecting... (尝试 {retry_count + 1}/{max_retries})")
-                        self.rtasr_client = XunfeiRTASRClient(app_id=settings.XUNFEI_APP_ID, api_key=settings.XUNFEI_RTASR_API_KEY, on_result=on_rtasr_result)
-                        self.rtasr_client.connect()
-                        print("[WebRTCConsumer] RTASR ws connected")
-                        # 连接成功，发送通知
-                        asyncio.run_coroutine_threadsafe(
-                            self.send(text_data=json.dumps({'type': 'asr_status', 'status': 'connected', 'message': '语音识别已启用'})), loop)
-                        return
-                    except Exception as e:
-                        retry_count += 1
-                        print(f"[WebRTCConsumer] RTASR ws connect error (尝试 {retry_count}): {e}")
-                        if retry_count < max_retries:
-                            import time
-                            time.sleep(2)  # 等待2秒后重试
-                        else:
-                            # 所有重试都失败，发送友好的错误消息
-                            error_msg = "语音识别服务暂不可用，但不影响面试进行。您可以继续面试，答案将通过其他方式记录。"
-                            asyncio.run_coroutine_threadsafe(
-                                self.send(text_data=json.dumps({'type': 'asr_status', 'status': 'failed', 'message': error_msg})), loop)
-            threading.Thread(target=start_rtasr, daemon=True).start()
+            # 注意：RTASR启动延后到create_stream完成后，避免idle超时
+            self._rtasr_started = False
             
             # 注意：问题队列的初始化将在handle_create_stream中进行，因为此时还没有interview_id
             await self.send(text_data=json.dumps({
@@ -229,6 +203,12 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             
             # 初始化问题队列（现在有了interview_id和resume_id）
             self.question_queue = await self.init_question_queue()
+            
+            # 在问题初始化完毕后启动RTASR，避免前端无音频发送导致idle超时
+            try:
+                self._start_rtasr()
+            except Exception as start_err:
+                print(f"[WebRTCConsumer] 延后启动RTASR失败: {start_err}")
             
             # 启动异步知识点生成任务
             if hasattr(self, '_pending_knowledge_points_data'):
@@ -1782,3 +1762,45 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 'type': 'error',
                 'text': f'提交代码失败: {str(e)}'
             }))
+
+    def _start_rtasr(self):
+        """在事件循环已就绪后启动RTASR，仅启动一次。"""
+        if getattr(self, '_rtasr_started', False):
+            return
+        loop = self._ws_loop or asyncio.get_event_loop()
+        
+        def on_rtasr_result(text):
+            asyncio.run_coroutine_threadsafe(self.handle_asr_result(text), loop)
+        
+        def start_rtasr_thread():
+            retry_count = 0
+            max_retries = 3
+            while retry_count < max_retries:
+                try:
+                    print(f"[WebRTCConsumer] RTASR ws connecting... (尝试 {retry_count + 1}/{max_retries})")
+                    self.rtasr_client = XunfeiRTASRClient(
+                        app_id=settings.XUNFEI_APP_ID,
+                        api_key=settings.XUNFEI_RTASR_API_KEY,
+                        on_result=on_rtasr_result
+                    )
+                    self.rtasr_client.connect()
+                    print("[WebRTCConsumer] RTASR ws connected")
+                    asyncio.run_coroutine_threadsafe(
+                        self.send(text_data=json.dumps({'type': 'asr_status', 'status': 'connected', 'message': '语音识别已启用'})),
+                        loop
+                    )
+                    return
+                except Exception as e:
+                    retry_count += 1
+                    print(f"[WebRTCConsumer] RTASR ws connect error (尝试 {retry_count}): {e}")
+                    if retry_count < max_retries:
+                        import time
+                        time.sleep(2)
+                    else:
+                        error_msg = "语音识别服务暂不可用，但不影响面试进行。您可以继续面试，答案将通过其他方式记录。"
+                        asyncio.run_coroutine_threadsafe(
+                            self.send(text_data=json.dumps({'type': 'asr_status', 'status': 'failed', 'message': error_msg})),
+                            loop
+                        )
+        threading.Thread(target=start_rtasr_thread, daemon=True).start()
+        self._rtasr_started = True
