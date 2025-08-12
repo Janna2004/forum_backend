@@ -8,7 +8,11 @@ import json
 class InterviewCreateSerializer(serializers.ModelSerializer):
     job_position_id = serializers.IntegerField(required=False, allow_null=True)
     resume_id = serializers.IntegerField(required=True)  # 添加必需的简历ID字段
-    interview_time = serializers.DateTimeField(required=False)
+    interview_time = serializers.DateTimeField(
+        required=False,
+        input_formats=['%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S.%fZ', 'iso-8601'],
+        default_timezone=None  # 保持原始时区信息
+    )
 
     class Meta:
         model = Interview
@@ -95,10 +99,37 @@ class InterviewCreateSerializer(serializers.ModelSerializer):
         # 设置用户
         validated_data['user'] = user
         
-        # 如果没有提供面试时间，使用当前时间
-        if 'interview_time' not in validated_data:
+        # 处理面试时间：将前端发送的时间视为本地时间
+        if 'interview_time' in validated_data:
             from django.utils import timezone
-            validated_data['interview_time'] = timezone.now()
+            import pytz
+            
+            # 获取前端发送的时间
+            frontend_time = validated_data['interview_time']
+            
+            # 如果前端发送的是时间字符串，直接解析为本地时间
+            if isinstance(frontend_time, str):
+                # 如果字符串以Z结尾，移除Z
+                if frontend_time.endswith('Z'):
+                    frontend_time = frontend_time[:-1]
+                
+                # 解析为datetime对象（无时区信息）
+                parsed_time = timezone.datetime.fromisoformat(frontend_time)
+                
+                # 添加北京时间时区信息
+                beijing_tz = pytz.timezone('Asia/Shanghai')
+                validated_data['interview_time'] = beijing_tz.localize(parsed_time)
+            else:
+                # 如果已经是datetime对象，添加本地时区信息
+                if frontend_time.tzinfo is None:
+                    beijing_tz = pytz.timezone('Asia/Shanghai')
+                    validated_data['interview_time'] = beijing_tz.localize(frontend_time)
+        else:
+            # 如果没有提供面试时间，使用当前本地时间
+            from django.utils import timezone
+            import pytz
+            beijing_tz = pytz.timezone('Asia/Shanghai')
+            validated_data['interview_time'] = beijing_tz.localize(timezone.datetime.now())
         
         # 创建面试记录
         interview = super().create(validated_data)
@@ -126,7 +157,32 @@ class InterviewListSerializer(serializers.ModelSerializer):
             'question_count',  # 添加问题数量字段
             'created_at',
             'updated_at',
-        ] 
+        ]
+    
+    def to_representation(self, instance):
+        """自定义序列化，直接返回北京时间格式"""
+        data = super().to_representation(instance)
+        
+        # 直接返回北京时间格式，不需要转换
+        import pytz
+        beijing_tz = pytz.timezone('Asia/Shanghai')
+        
+        # 处理interview_time
+        if instance.interview_time:
+            # 直接格式化为北京时间
+            data['interview_time'] = instance.interview_time.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        
+        # 处理created_at
+        if instance.created_at:
+            # 直接格式化为北京时间
+            data['created_at'] = instance.created_at.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        
+        # 处理updated_at
+        if instance.updated_at:
+            # 直接格式化为北京时间
+            data['updated_at'] = instance.updated_at.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        
+        return data
     
     def get_question_count(self, obj):
         """获取问题数量"""

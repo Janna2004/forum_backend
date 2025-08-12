@@ -44,9 +44,15 @@ class InterviewCreateView(generics.CreateAPIView):
             interview = serializer.save()
             logger.info(f"面试创建成功 - ID: {interview.id}, 用户: {request.user.id}")
             
+            # 直接格式化为北京时间
+            if interview.interview_time:
+                formatted_time = interview.interview_time.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+            else:
+                formatted_time = None
+            
             return Response({
                 'id': interview.id,
-                'interview_time': interview.interview_time,
+                'interview_time': formatted_time,
                 'position_name': interview.position_name,
                 'company_name': interview.company_name,
                 'position_type': interview.position_type,
