@@ -230,6 +230,16 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             # 初始化问题队列（现在有了interview_id和resume_id）
             self.question_queue = await self.init_question_queue()
             
+            # 启动异步知识点生成任务
+            if hasattr(self, '_pending_knowledge_points_data'):
+                asyncio.create_task(self._async_generate_knowledge_points(
+                    self._pending_knowledge_points_data['questions'],
+                    self._pending_knowledge_points_data['position_type'],
+                    self._pending_knowledge_points_data['kb_service']
+                ))
+                # 清理临时数据
+                delattr(self, '_pending_knowledge_points_data')
+            
             # 返回成功响应
             await self.send(text_data=json.dumps({
                 'type': 'stream_created',
@@ -569,7 +579,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def init_question_queue(self):
-        """初始化面试问题队列"""
+        """初始化面试问题队列 - 异步生成知识点版本"""
         import re  # 在方法内部重新导入re模块，避免装饰器作用域问题
         print(f"[调试] init_question_queue - interview_id: {self.interview_id} resume_id: {self.resume_id}")
         
@@ -675,26 +685,30 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                 print("[调试] 生成问题失败，使用默认问题")
                 return self._get_default_questions_with_knowledge_points()
                 
-            # 处理生成的问题并生成知识点标注
+            # 处理生成的问题，先使用默认知识点，然后异步生成
             processed_questions = []
             for q in questions.split('\n'):
                 # 去除序号和空白
                 q = re.sub(r'^\d+\.\s*', '', q.strip())
                 if q:  # 忽略空行
-                    try:
-                        # 为每个问题生成知识点标注
-                        knowledge_points = self._generate_knowledge_points_for_question(q, position_type, kb_service)
-                    except Exception as e:
-                        print(f"[调试] 为问题生成知识点失败: {q[:50]}... 错误: {e}")
-                        # 知识点生成失败时使用默认知识点
-                        knowledge_points = self._generate_rule_based_knowledge_points(q, position_type)
+                    # 先使用默认知识点，避免阻塞
+                    default_knowledge_points = self._generate_rule_based_knowledge_points(q, position_type)
                     
                     processed_questions.append({
                         'question': q,
-                        'knowledge_points': knowledge_points
+                        'knowledge_points': default_knowledge_points,
+                        'knowledge_points_generated': False  # 标记知识点是否已生成
                     })
             
-            print(f"[调试] 生成的问题列表: {processed_questions}")
+            print(f"[调试] 生成的问题列表（使用默认知识点）: {processed_questions}")
+            
+            # 保存岗位类型和知识库服务实例，供后续异步使用
+            self._pending_knowledge_points_data = {
+                'questions': processed_questions,
+                'position_type': position_type,
+                'kb_service': kb_service
+            }
+            
             return processed_questions
             
         except Exception as e:
@@ -715,7 +729,38 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
                         'knowledge_points': ["技术能力", "工作经验"]
                     }
                 ]
-    
+
+    async def _async_generate_knowledge_points(self, questions, position_type, kb_service):
+        """异步生成知识点"""
+        print(f"[调试] 开始异步生成知识点，共 {len(questions)} 个问题")
+        
+        for i, question_data in enumerate(questions):
+            try:
+                question = question_data['question']
+                print(f"[调试] 异步生成知识点 {i+1}/{len(questions)}: {question[:50]}...")
+                
+                # 使用asyncio.to_thread包装同步的LLM调用
+                knowledge_points = await asyncio.to_thread(
+                    self._generate_knowledge_points_for_question, 
+                    question, 
+                    position_type, 
+                    kb_service
+                )
+                
+                if knowledge_points:
+                    # 更新问题数据
+                    question_data['knowledge_points'] = knowledge_points
+                    question_data['knowledge_points_generated'] = True
+                    print(f"[调试] 异步生成知识点成功: {knowledge_points}")
+                else:
+                    print(f"[调试] 异步生成知识点失败，保持默认知识点")
+                    
+            except Exception as e:
+                print(f"[调试] 异步生成知识点出错: {str(e)}")
+                # 保持默认知识点不变
+        
+        print(f"[调试] 异步知识点生成完成")
+
     def _get_default_questions(self):
         """获取默认问题列表"""
         return [
@@ -757,11 +802,17 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         ]
     
     def _generate_knowledge_points_for_question(self, question, position_type, kb_service):
-        """使用规则为问题生成知识点标注"""
+        """为问题生成知识点标注，优先使用LLM从知识点库选择"""
         try:
-            # 直接使用规则生成知识点，避免重复调用AI服务
+            # 首先尝试使用LLM从知识点库中选择
+            knowledge_points = self._generate_llm_based_knowledge_points(question, position_type, kb_service)
+            if knowledge_points:
+                print(f"[调试] LLM生成知识点: {question[:50]}... -> {knowledge_points}")
+                return knowledge_points
+            
+            # 如果LLM失败，使用规则生成
             knowledge_points = self._generate_rule_based_knowledge_points(question, position_type)
-            print(f"[调试] 问题知识点标注: {question[:50]}... -> {knowledge_points}")
+            print(f"[调试] 规则生成知识点: {question[:50]}... -> {knowledge_points}")
             return knowledge_points
             
         except Exception as e:
@@ -823,7 +874,73 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             knowledge_points = list(set(knowledge_points))[:6]
         
         return knowledge_points
-    
+
+    def _generate_llm_based_knowledge_points(self, question, position_type, kb_service):
+        """使用LLM从知识点库中选择知识点"""
+        try:
+            # 从数据库获取当前岗位类型的所有知识点
+            from interviews.models import KnowledgePoint
+            knowledge_points = KnowledgePoint.objects.filter(position_type=position_type).values_list('name', flat=True)
+            knowledge_points_list = list(knowledge_points)
+            
+            if not knowledge_points_list:
+                print(f"[调试] 未找到岗位类型 {position_type} 的知识点")
+                return None
+            
+            # 构建提示词
+            prompt = f"""请根据以下面试问题，从知识点库中选择1-3个最相关的知识点标签。
+
+面试问题：{question}
+岗位类型：{position_type}
+
+可选的知识点标签：
+{', '.join(knowledge_points_list)}
+
+请严格按照以下格式返回，只返回知识点名称，用逗号分隔：
+知识点1,知识点2,知识点3
+
+注意：
+1. 只能从上述知识点标签中选择
+2. 选择1-3个最相关的知识点
+3. 如果问题与任何知识点都不相关，返回"其他"
+4. 严格按照格式返回，不要添加其他内容
+"""
+            
+            # 调用LLM服务
+            response = kb_service.spark_service._send_message(prompt)
+            
+            if not response:
+                print(f"[调试] LLM调用失败，返回空响应")
+                return None
+            
+            # 解析响应
+            response = response.strip()
+            if response == "其他" or not response:
+                print(f"[调试] LLM返回'其他'或空响应")
+                return None
+            
+            # 解析知识点
+            selected_points = [point.strip() for point in response.split(',') if point.strip()]
+            
+            # 验证知识点是否在库中
+            valid_points = []
+            for point in selected_points:
+                if point in knowledge_points_list:
+                    valid_points.append(point)
+                else:
+                    print(f"[调试] 知识点 '{point}' 不在知识库中")
+            
+            if not valid_points:
+                print(f"[调试] 没有有效的知识点被选择")
+                return None
+            
+            print(f"[调试] LLM选择了知识点: {valid_points}")
+            return valid_points[:3]  # 最多返回3个
+            
+        except Exception as e:
+            print(f"[调试] LLM生成知识点失败: {str(e)}")
+            return None
+
     async def handle_disconnect(self, data):
         """处理断开连接请求"""
         try:
@@ -1558,11 +1675,11 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         if not self.coding_problems:
             print("[DEBUG] 没有更多代码题，面试结束")
             # 面试全部结束
-            await self.send(text_data=json.dumps({
-                'type': 'interview_message',
-                'phase': self.PHASE_CODE,
-                'text': '代码题环节结束。'
-            }))
+            # await self.send(text_data=json.dumps({
+            #     'type': 'interview_message',
+            #     'phase': self.PHASE_CODE,
+            #     'text': '代码题环节结束。'
+            # }))
             await self.finish_interview()
             return
         

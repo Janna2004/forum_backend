@@ -214,3 +214,28 @@ class InterviewResult(models.Model):
     
     def __str__(self):
         return f"{self.user.username} - {self.interview.position_name} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+
+
+class KnowledgePoint(models.Model):
+    """知识点标签模型"""
+    POSITION_TYPE_CHOICES = [
+        ('backend', '后端开发'),
+        ('frontend', '前端开发'),
+        ('pm', '产品经理'),
+        ('qa', '测试'),
+        ('algo', '算法'),
+        ('data', '数据'),
+    ]
+    
+    name = models.CharField(max_length=100, unique=True, verbose_name='知识点名称')
+    position_type = models.CharField(max_length=20, choices=POSITION_TYPE_CHOICES, verbose_name='适用岗位类型')
+    description = models.TextField(blank=True, verbose_name='知识点描述')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    
+    class Meta:
+        verbose_name = '知识点标签'
+        verbose_name_plural = '知识点标签'
+        ordering = ['position_type', 'name']
+    
+    def __str__(self):
+        return f"{self.get_position_type_display()} - {self.name}"

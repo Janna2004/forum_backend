@@ -747,6 +747,7 @@ class InterviewEvaluationService:
         try:
             # 获取面试记录及其所有答案
             interview = Interview.objects.get(id=interview_id)
+            questions = interview.question_queue
             answers = InterviewAnswer.objects.filter(interview=interview)
             
             if not answers.exists():
@@ -818,7 +819,7 @@ class InterviewEvaluationService:
             last_compare = self._get_last_compare_result(interview, dimensions, scores)
             
             # 生成总结
-            summary = self._generate_summary(interview, answers, scores, knowledge_points)
+            summary = self._generate_summary(interview, questions, answers, scores, knowledge_points)
             
             # 存储评估结果到新表
             try:
@@ -1064,11 +1065,12 @@ class InterviewEvaluationService:
             print(f"获取对比结果出错: {e}")
             return None
     
-    def _generate_summary(self, interview, answers, scores, knowledge_points):
+    def _generate_summary(self, interview, questions, answers, scores, knowledge_points):
         """生成面试总结"""
         try:
             print(f"[调试] 开始生成面试总结，面试岗位: {interview.position_name}")
             print(f"[调试] 面试表现总分: {sum(scores)/len(scores):.1f}分")
+            print(f"[调试] 面试问题: {questions}")
             print(f"[调试] 涉及知识点: {', '.join(knowledge_points.keys())}")
             
             # 获取本次面试所有问题的ai_analysis文本
@@ -1084,8 +1086,8 @@ class InterviewEvaluationService:
 
 面试岗位：{interview.position_name}
 面试表现：总分{sum(scores)/len(scores):.1f}分
-涉及知识点：{', '.join(knowledge_points.keys())}
-本次面试所有问题的AI分析结果：
+所有问题：{', '.join(questions)}
+面试者给出答案的AI分析结果：
 {ai_analysis_text}
 
 请按以下格式返回：
