@@ -32,16 +32,16 @@ class XunfeiSparkService:
         now = datetime.now()
         date = format_date_time(mktime(now.timetuple()))
         
-        print(f"[调试] 生成的日期: {date}")
-        print(f"[调试] API_SECRET: {self.api_secret}")
-        print(f"[调试] API_KEY: {self.api_key}")
+        # print(f"[调试] 生成的日期: {date}")
+        # print(f"[调试] API_SECRET: {self.api_secret}")
+        # print(f"[调试] API_KEY: {self.api_key}")
         
         # 拼接字符串 - 使用与test_llm.py相同的格式
         signature_origin = "host: " + "spark-api.xf-yun.com" + "\n"
         signature_origin += "date: " + date + "\n"
         signature_origin += "GET /v3.1/chat HTTP/1.1"
         
-        print(f"[调试] 签名原始字符串: {signature_origin}")
+        # print(f"[调试] 签名原始字符串: {signature_origin}")
         
         # 使用hmac-sha256进行加密 - 与test_llm.py保持一致
         signature_sha = hmac.new(
@@ -51,13 +51,13 @@ class XunfeiSparkService:
         ).digest()
         
         signature_sha_base64 = base64.b64encode(signature_sha).decode('utf-8')
-        print(f"[调试] 生成的签名: {signature_sha_base64}")
+        #print(f"[调试] 生成的签名: {signature_sha_base64}")
         
         authorization_origin = f'api_key="{self.api_key}", algorithm="hmac-sha256", headers="host date request-line", signature="{signature_sha_base64}"'
         authorization = base64.b64encode(authorization_origin.encode('utf-8')).decode('utf-8')
         
-        print(f"[调试] authorization_origin: {authorization_origin}")
-        print(f"[调试] authorization: {authorization}")
+        # print(f"[调试] authorization_origin: {authorization_origin}")
+        # print(f"[调试] authorization: {authorization}")
         
         # 将请求的鉴权参数组合为字典
         v = {
@@ -77,7 +77,7 @@ class XunfeiSparkService:
         print(f"[调试] 消息内容: {message[:100]}...")
         
         url = self._create_url()
-        print(f"[调试] 生成的URL: {url}")
+        # print(f"[调试] 生成的URL: {url}")
         
         # 构建请求数据
         data = {

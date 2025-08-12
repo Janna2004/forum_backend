@@ -60,6 +60,8 @@ def analyze_interview_answer(answer_id, av_path=None, audio_path=None, has_audio
 5分：优秀水平，远超预期要求
 
 问题涉及的知识点：{knowledge_points_str}
+面试问题：{answer.question}
+按照STAR结构（情境（Situation）、任务（Task）、行动（Action）和结果）给出当前问题的回答建议，不超过五十字。
 
 请按以下格式输出：
 专业知识水平：X分。理由：...
@@ -69,9 +71,8 @@ def analyze_interview_answer(answer_id, av_path=None, audio_path=None, has_audio
 创新能力：X分。理由：...
 应变抗压能力：X分。理由：...
 答案正确性：X分。理由：...
-
-面试问题：{answer.question}
-应答内容：{answer.answer}"""
+回答建议：...
+"""
         
         print(f"[调试] 准备调用 AI API - answer_id: {answer_id}")
         client = OpenAI(

@@ -170,3 +170,47 @@ class InterviewCodingAnswer(models.Model):
     
     def __str__(self):
         return f"{self.user.username} - {self.problem.title}"
+
+
+class InterviewResult(models.Model):
+    """面试评估结果模型"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    interview = models.ForeignKey(Interview, on_delete=models.CASCADE, related_name='evaluation_results', verbose_name='面试')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='interview_results', verbose_name='用户')
+    
+    # 雷达图数据
+    radar_dimensions = models.JSONField(default=list, verbose_name='雷达图维度')
+    radar_scores = models.JSONField(default=list, verbose_name='雷达图分数')
+    radar_comment = models.TextField(blank=True, verbose_name='雷达图评论')
+    
+    # 知识点分布数据（饼图）
+    pie_points = models.JSONField(default=list, verbose_name='知识点分布数据')
+    pie_comment = models.TextField(blank=True, verbose_name='知识点分布评论')
+    
+    # 知识点掌握程度数据（柱状图）
+    bar_labels = models.JSONField(default=list, verbose_name='知识点标签')
+    bar_accuracy = models.JSONField(default=list, verbose_name='知识点掌握度')
+    bar_comment = models.TextField(blank=True, verbose_name='知识点掌握度评论')
+    
+    # 总分
+    total_score = models.FloatField(default=0, verbose_name='总分')
+    
+    # 与上次面试对比
+    last_compare = models.JSONField(default=dict, blank=True, verbose_name='与上次面试对比')
+    
+    # 总结
+    star_summary = models.TextField(blank=True, verbose_name='STAR总结')
+    technical_summary = models.TextField(blank=True, verbose_name='技术总结')
+    
+    # 时间戳
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+    
+    class Meta:
+        verbose_name = '面试评估结果'
+        verbose_name_plural = '面试评估结果'
+        ordering = ['-created_at']
+        unique_together = ['interview', 'user']  # 每个面试只能有一个评估结果
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.interview.position_name} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"

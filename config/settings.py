@@ -53,7 +53,7 @@ INSTALLED_APPS = [
     'interviews',  # 新增面试应用
     'crawler.interview_position',  # 添加interview_position应用
     'positions',  # 添加positions应用
-    'code',  # 添加code应用
+    'code_execution',  # 添加code_execution应用
 ]
 
 MIDDLEWARE = [

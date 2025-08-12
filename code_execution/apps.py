@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class CodeConfig(AppConfig):
+class CodeExecutionConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'code'
+    name = 'code_execution'
