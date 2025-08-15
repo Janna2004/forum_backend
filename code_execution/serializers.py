@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import ProblemBank, Problem
+from .models import ProblemBank, Problem, ProblemSubmission, ProblemAnswer
 
 class ProblemBankSerializer(serializers.ModelSerializer):
     """题库列表序列化器"""
@@ -26,7 +26,7 @@ class ProblemBankSerializer(serializers.ModelSerializer):
 class ProblemSerializer(serializers.ModelSerializer):
     """题目详情序列化器"""
     problem_set_title = serializers.CharField(source='problem_set.title', read_only=True)
-    
+
     class Meta:
         model = Problem
         fields = [
@@ -34,3 +34,38 @@ class ProblemSerializer(serializers.ModelSerializer):
             'description', 'scenario', 'difficulty', 'tags', 'question',
             'reference_answer', 'analysis', 'created_at', 'updated_at'
         ]
+
+class ProblemAnswerSerializer(serializers.ModelSerializer):
+    """单题答题记录序列化器"""
+    problem_question = serializers.CharField(source='problem.question', read_only=True)
+
+    class Meta:
+        model = ProblemAnswer
+        fields = [
+            'problem_question', 'user_answer', 'analysis', 'score', 'max_score'
+        ]
+
+class ProblemSubmissionSerializer(serializers.ModelSerializer):
+    """答题提交记录序列化器"""
+    answers = ProblemAnswerSerializer(many=True, read_only=True)
+    accuracy_rate = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProblemSubmission
+        fields = [
+            'total_score', 'total_problems', 'correct_count', 'accuracy_rate',
+            'overall_analysis', 'answers'
+        ]
+
+    def get_accuracy_rate(self, obj):
+        """计算正确率"""
+        if obj.total_problems == 0:
+            return 0
+        return round((obj.correct_count / obj.total_problems) * 100, 1)
+
+class SubmitAnswersSerializer(serializers.Serializer):
+    """提交答案序列化器"""
+    answers = serializers.DictField(
+        child=serializers.CharField(),
+        help_text="题目ID到答案的映射，例如: {'problem-001': '用户答案内容'}"
+    )

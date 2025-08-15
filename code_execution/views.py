@@ -8,8 +8,9 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import api_view, permission_classes
 from django.db.models import Q
-from .models import ProblemBank, Problem
-from .serializers import ProblemBankSerializer, ProblemSerializer
+from .models import ProblemBank, Problem, ProblemSubmission, ProblemAnswer
+from .serializers import ProblemBankSerializer, ProblemSerializer, ProblemSubmissionSerializer, SubmitAnswersSerializer
+from .services import ProblemEvaluationService
 
 logger = logging.getLogger(__name__)
 
@@ -281,3 +282,191 @@ def search_problems(request):
             'problems': len(results['problems'])
         }
     })
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def submit_answers(request, problem_set_id):
+    """提交答题评析接口"""
+    try:
+        # 验证题库是否存在
+        try:
+            problem_bank = ProblemBank.objects.get(id=problem_set_id)
+        except ProblemBank.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': '题库不存在'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # 验证题库是否为非算法题
+        if problem_bank.is_algorithm:
+            return Response({
+                'success': False,
+                'error': '该接口仅支持非算法题库'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 验证请求数据
+        serializer = SubmitAnswersSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({
+                'success': False,
+                'error': '请求数据格式错误',
+                'details': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        answers_data = serializer.validated_data['answers']
+        
+        # 验证所有题目是否存在且属于该题库
+        problem_ids = list(answers_data.keys())
+        problems = Problem.objects.filter(id__in=problem_ids, problem_set=problem_bank)
+        
+        if len(problems) != len(problem_ids):
+            return Response({
+                'success': False,
+                'error': '部分题目不存在或不属于该题库'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 创建答题提交记录
+        submission = ProblemSubmission.objects.create(
+            user=request.user,
+            problem_bank=problem_bank,
+            total_problems=len(problem_ids),
+            total_score=0,
+            correct_count=0
+        )
+        
+        # 初始化评析服务
+        evaluation_service = ProblemEvaluationService()
+        
+        total_score = 0
+        correct_count = 0
+        
+        # 一次性评析所有题目并生成整体评析 - 只调用一次LLM
+        try:
+            # 准备评析数据
+            problems_and_answers = []
+            for problem in problems:
+                user_answer = answers_data.get(problem.id, '')
+                problems_and_answers.append((problem, user_answer))
+            
+            # 一次性调用评析服务（包含整体评析）
+            result = evaluation_service.evaluate_problems_with_overall_analysis(
+                problems_and_answers, 
+                problem_bank.title
+            )
+            
+            evaluations = result['evaluations']
+            overall_analysis = result['overall_analysis']
+            
+            # 创建答题记录
+            for i, (problem, user_answer) in enumerate(problems_and_answers):
+                evaluation = evaluations.get(str(i), {'score': 0, 'analysis': '评析解析失败'})
+                
+                problem_answer = ProblemAnswer.objects.create(
+                    submission=submission,
+                    problem=problem,
+                    user_answer=user_answer,
+                    score=evaluation['score'],
+                    max_score=40,  # 满分40分
+                    analysis=evaluation['analysis'],
+                    strengths="",
+                    weaknesses="",
+                    suggestions=""
+                )
+                
+                total_score += evaluation['score']
+                # 如果得分超过20分（50%）认为是正确
+                if evaluation['score'] >= 20:
+                    correct_count += 1
+            
+            # 更新提交记录（包含整体评析）
+            submission.total_score = total_score
+            submission.correct_count = correct_count
+            submission.overall_analysis = overall_analysis
+            submission.improvement_suggestions = ""
+            submission.save()
+                    
+        except Exception as e:
+            logger.error(f"评析时出错: {str(e)}")
+            # 创建默认答题记录
+            for problem in problems:
+                user_answer = answers_data.get(problem.id, '')
+                problem_answer = ProblemAnswer.objects.create(
+                    submission=submission,
+                    problem=problem,
+                    user_answer=user_answer,
+                    score=0,
+                    max_score=40,
+                    analysis="评析服务暂时不可用",
+                    strengths="",
+                    weaknesses="",
+                    suggestions=""
+                )
+            
+            # 更新提交记录（使用默认整体评析）
+            submission.total_score = total_score
+            submission.correct_count = correct_count
+            submission.overall_analysis = "整体表现良好，各题得分较为均衡"
+            submission.improvement_suggestions = ""
+            submission.save()
+        
+        # 返回评析结果
+        result_serializer = ProblemSubmissionSerializer(submission)
+        
+        return Response({
+            'success': True,
+            'message': '答题评析完成',
+            'data': result_serializer.data
+        })
+        
+    except Exception as e:
+        logger.error(f"答题评析时出错: {str(e)}")
+        return Response({
+            'success': False,
+            'error': '评析过程中发生错误，请稍后重试'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_submission_history(request):
+    """获取用户答题历史"""
+    try:
+        submissions = ProblemSubmission.objects.filter(user=request.user).order_by('-submitted_at')
+        serializer = ProblemSubmissionSerializer(submissions, many=True)
+        
+        return Response({
+            'success': True,
+            'data': serializer.data,
+            'total': submissions.count()
+        })
+        
+    except Exception as e:
+        logger.error(f"获取答题历史时出错: {str(e)}")
+        return Response({
+            'success': False,
+            'error': '获取答题历史失败'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_submission_detail(request, submission_id):
+    """获取答题详情"""
+    try:
+        submission = ProblemSubmission.objects.get(id=submission_id, user=request.user)
+        serializer = ProblemSubmissionSerializer(submission)
+        
+        return Response({
+            'success': True,
+            'data': serializer.data
+        })
+        
+    except ProblemSubmission.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': '答题记录不存在'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"获取答题详情时出错: {str(e)}")
+        return Response({
+            'success': False,
+            'error': '获取答题详情失败'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
