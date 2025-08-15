@@ -124,7 +124,17 @@ class ProblemListView(generics.ListAPIView):
         difficulty = self.request.query_params.get('difficulty')
         tags = self.request.query_params.getlist('tags')
         
-        queryset = Problem.objects.filter(problem_set_id=problem_set_id)
+        # 获取题库信息
+        try:
+            problem_bank = ProblemBank.objects.get(id=problem_set_id)
+        except ProblemBank.DoesNotExist:
+            return Problem.objects.none()
+        
+        # 根据题库类型过滤题目
+        queryset = Problem.objects.filter(
+            problem_set_id=problem_set_id,
+            is_algorithm=problem_bank.is_algorithm
+        )
         
         # 按难度过滤
         if difficulty:
@@ -170,7 +180,11 @@ class ProblemListView(generics.ListAPIView):
                 'is_algorithm': problem_bank.is_algorithm
             },
             'problems': serializer.data,
-            'total': queryset.count()
+            'total': queryset.count(),
+            'filters': {
+                'difficulty': request.query_params.get('difficulty'),
+                'tags': request.query_params.getlist('tags')
+            }
         })
 
 @api_view(['GET'])

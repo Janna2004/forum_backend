@@ -26,14 +26,48 @@ class ProblemBankSerializer(serializers.ModelSerializer):
 class ProblemSerializer(serializers.ModelSerializer):
     """题目详情序列化器"""
     problem_set_title = serializers.CharField(source='problem_set.title', read_only=True)
+    
+    # 算法题特有字段
+    test_cases = serializers.SerializerMethodField()
+    constraints = serializers.SerializerMethodField()
+    code_template = serializers.SerializerMethodField()
+    
+    # 非算法题特有字段
+    knowledge_points = serializers.SerializerMethodField()
+    scoring_criteria = serializers.SerializerMethodField()
 
     class Meta:
         model = Problem
         fields = [
             'id', 'problem_set', 'problem_set_title', 'category', 'title',
-            'description', 'scenario', 'difficulty', 'tags', 'question',
-            'reference_answer', 'analysis', 'created_at', 'updated_at'
+            'description', 'scenario', 'difficulty', 'tags', 'is_algorithm',
+            'question', 'reference_answer', 'analysis',
+            # 算法题特有字段
+            'test_cases', 'constraints', 'code_template',
+            # 非算法题特有字段
+            'knowledge_points', 'scoring_criteria',
+            'created_at', 'updated_at'
         ]
+    
+    def get_test_cases(self, obj):
+        """获取测试用例（仅算法题）"""
+        return obj.test_cases
+    
+    def get_constraints(self, obj):
+        """获取约束条件（仅算法题）"""
+        return obj.constraints
+    
+    def get_code_template(self, obj):
+        """获取代码模板（仅算法题）"""
+        return obj.code_template
+    
+    def get_knowledge_points(self, obj):
+        """获取知识点（仅非算法题）"""
+        return obj.knowledge_points
+    
+    def get_scoring_criteria(self, obj):
+        """获取评分标准（仅非算法题）"""
+        return obj.scoring_criteria
 
 class ProblemAnswerSerializer(serializers.ModelSerializer):
     """单题答题记录序列化器"""

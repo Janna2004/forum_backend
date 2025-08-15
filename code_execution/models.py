@@ -75,9 +75,23 @@ class Problem(models.Model):
     scenario = models.TextField(verbose_name='场景描述')
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, verbose_name='难度')
     tags = models.JSONField(default=list, verbose_name='标签')
+    is_algorithm = models.BooleanField(default=False, verbose_name='是否为算法题')
+    
+    # 通用字段
     question = models.TextField(verbose_name='问题内容')
     reference_answer = models.TextField(verbose_name='参考答案')
     analysis = models.TextField(verbose_name='题目分析')
+    
+    # 算法题特有字段
+    algorithm_constraints = models.JSONField(blank=True, null=True, verbose_name='算法题约束条件')
+    algorithm_test_cases = models.JSONField(blank=True, null=True, verbose_name='算法题测试用例')
+    algorithm_solution = models.TextField(blank=True, null=True, verbose_name='算法题解答')
+    algorithm_code_template = models.TextField(blank=True, null=True, verbose_name='算法题代码模板')
+    
+    # 非算法题特有字段
+    non_algorithm_knowledge_points = models.JSONField(blank=True, null=True, verbose_name='非算法题知识点')
+    non_algorithm_scoring_criteria = models.JSONField(blank=True, null=True, verbose_name='非算法题评分标准')
+    
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -88,6 +102,41 @@ class Problem(models.Model):
 
     def __str__(self):
         return f"{self.problem_set.title} - {self.title}"
+    
+    @property
+    def test_cases(self):
+        """获取测试用例（仅算法题）"""
+        if self.is_algorithm and self.algorithm_test_cases:
+            return self.algorithm_test_cases
+        return None
+    
+    @property
+    def constraints(self):
+        """获取约束条件（仅算法题）"""
+        if self.is_algorithm and self.algorithm_constraints:
+            return self.algorithm_constraints
+        return None
+    
+    @property
+    def code_template(self):
+        """获取代码模板（仅算法题）"""
+        if self.is_algorithm and self.algorithm_code_template:
+            return self.algorithm_code_template
+        return None
+    
+    @property
+    def knowledge_points(self):
+        """获取知识点（仅非算法题）"""
+        if not self.is_algorithm and self.non_algorithm_knowledge_points:
+            return self.non_algorithm_knowledge_points
+        return None
+    
+    @property
+    def scoring_criteria(self):
+        """获取评分标准（仅非算法题）"""
+        if not self.is_algorithm and self.non_algorithm_scoring_criteria:
+            return self.non_algorithm_scoring_criteria
+        return None
 
 class ProblemSubmission(models.Model):
     """答题提交记录模型"""
