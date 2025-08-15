@@ -4,7 +4,7 @@ from .views import (
     get_resume, create_or_update_resume, manage_work_experience,
     manage_project_experience, manage_education_experience, manage_custom_section,
     delete_work_experience, delete_project_experience, delete_education_experience, delete_custom_section,
-    get_user_resumes
+    get_user_resumes, get_personalized_recommendations
 )
 
 urlpatterns = [
@@ -37,4 +37,7 @@ urlpatterns = [
     path('resume/project/delete/', delete_project_experience, name='delete_project_experience'),
     path('resume/education/delete/', delete_education_experience, name='delete_education_experience'),
     path('resume/custom/delete/', delete_custom_section, name='delete_custom_section'),
+    
+    # 个性化推荐
+    path('recommendations/', get_personalized_recommendations, name='get_personalized_recommendations'),
 ] 

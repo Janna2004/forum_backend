@@ -11,6 +11,10 @@ from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from .services import PersonalizedRecommendationService
+from .serializers import PersonalizedRecommendationSerializer
 
 # Create your views here.
 
@@ -600,3 +604,40 @@ def get_user_resumes(request):
         
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_personalized_recommendations(request):
+    """获取个性化路径推荐"""
+    try:
+        user = request.user
+        
+        # 构建用户画像
+        user_profile = {
+            'target_position': user.target_position
+        }
+        
+        # 调用推荐服务
+        recommendation_service = PersonalizedRecommendationService()
+        recommendations = recommendation_service.get_personalized_recommendations(user_profile)
+        
+        # 验证响应格式
+        serializer = PersonalizedRecommendationSerializer(data=recommendations)
+        if serializer.is_valid():
+            return Response({
+                'success': True,
+                'data': serializer.validated_data
+            })
+        else:
+            # 如果验证失败，返回默认推荐
+            default_recommendations = recommendation_service._get_default_recommendations()
+            return Response({
+                'success': True,
+                'data': default_recommendations
+            })
+            
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': f'获取推荐失败: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
