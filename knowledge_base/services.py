@@ -6,6 +6,7 @@ import hashlib
 import websocket
 import threading
 import re
+import requests
 from datetime import datetime
 from time import mktime
 from urllib.parse import urlencode
@@ -247,7 +248,9 @@ class KnowledgeBaseService:
     """知识库检索服务"""
     
     def __init__(self):
-        self.spark_service = XunfeiSparkService()
+        # 优先使用HTTP服务，如果失败则回退到WebSocket服务
+        self.spark_service = XunfeiSparkHttpService()
+        self.spark_service_fallback = XunfeiSparkService()
     
     def generate_interview_questions(self, prompt: str) -> str:
         """根据提示词生成面试问题"""
@@ -290,7 +293,11 @@ class KnowledgeBaseService:
             
             def call_ai_service():
                 try:
-                    result["response"] = self.spark_service._send_message(ai_prompt)
+                    # 优先使用HTTP服务
+                    result["response"] = self.spark_service.send_prompt(ai_prompt)
+                    if not result["response"]:
+                        # 如果HTTP服务失败，尝试WebSocket服务
+                        result["response"] = self.spark_service_fallback._send_message(ai_prompt)
                 except Exception as e:
                     result["error"] = str(e)
             
@@ -686,4 +693,114 @@ class KnowledgeBaseService:
             resume=resume,
             questions=questions,
             generation_context=generation_context
-        ) 
+        )
+
+
+class XunfeiSparkHttpService:
+    """讯飞星火HTTP API服务"""
+    
+    def __init__(self):
+        self.api_key = getattr(settings, 'XUNFEI_API_PASSWORD', '')
+        self.url = "https://spark-api-open.xf-yun.com/v1/chat/completions"
+        
+        # 检查API密钥是否正确设置
+        if not self.api_key:
+            print("[警告] XUNFEI_API_PASSWORD 未设置")
+        
+    def _send_message(self, prompt: str, stream: bool = False) -> str:
+        """发送消息到星火API并获取回复"""
+        try:
+            # 根据模板代码，不设置Content-Type，直接使用Authorization
+            headers = {
+                'Authorization': f'Bearer {self.api_key}'  # 添加Bearer前缀
+            }
+            
+            # 根据模板代码构建请求体
+            body = {
+                "max_tokens": 8192,
+                "top_k": 6,
+                "temperature": 1,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "model": "generalv3",  # 使用generalv3模型
+                "stream": stream
+            }
+            
+            if stream:
+                return self._send_stream_message(headers, body)
+            else:
+                return self._send_normal_message(headers, body)
+                
+        except Exception as e:
+            print(f"HTTP API调用失败: {str(e)}")
+            return ""
+    
+    def _send_normal_message(self, headers: dict, body: dict) -> str:
+        """发送普通消息（非流式）"""
+        try:
+            response = requests.post(url=self.url, json=body, headers=headers, timeout=30)
+            
+            if response.status_code != 200:
+                print(f"HTTP请求失败，状态码: {response.status_code}")
+                print(f"响应内容: {response.text}")
+                return ""
+            
+            data = response.json()
+            if 'choices' in data and len(data['choices']) > 0:
+                return data['choices'][0]['message']['content']
+            else:
+                print(f"API响应格式异常: {data}")
+                return ""
+                
+        except requests.exceptions.RequestException as e:
+            print(f"HTTP请求失败: {str(e)}")
+            return ""
+        except json.JSONDecodeError as e:
+            print(f"JSON解析失败: {str(e)}")
+            return ""
+    
+    def _send_stream_message(self, headers: dict, body: dict) -> str:
+        """发送流式消息"""
+        try:
+            full_response = ""
+            response = requests.post(url=self.url, json=body, headers=headers, stream=True, timeout=30)
+            response.raise_for_status()
+            
+            # 设置编码
+            response.encoding = "utf-8"
+            
+            for line in response.iter_lines(decode_unicode="utf-8"):
+                if line and '[DONE]' not in line:
+                    try:
+                        # 移除 "data: " 前缀
+                        if line.startswith('data: '):
+                            line = line[6:]
+                        
+                        chunk_data = json.loads(line)
+                        if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
+                            delta = chunk_data['choices'][0].get('delta', {})
+                            if 'content' in delta and delta['content']:
+                                content = delta['content']
+                                full_response += content
+                                print(content, end="", flush=True)
+                                
+                    except json.JSONDecodeError:
+                        continue
+                    except Exception as e:
+                        print(f"处理流式数据时出错: {str(e)}")
+                        continue
+            
+            print()  # 换行
+            return full_response
+            
+        except requests.exceptions.RequestException as e:
+            print(f"流式HTTP请求失败: {str(e)}")
+            return ""
+    
+    def send_prompt(self, prompt: str, stream: bool = False) -> str:
+        """发送提示词并获取回复（简化接口）"""
+        return self._send_message(prompt, stream)

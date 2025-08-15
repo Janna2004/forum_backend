@@ -867,9 +867,9 @@ class InterviewEvaluationService:
                 print(f"[调试] 错误详情: {traceback.format_exc()}")
             
             # 获取每个问题的AI分析详情
-            question_analyses = []
+            question_analysis = []
             for answer in answers:
-                question_analyses.append({
+                question_analysis.append({
                     'question': answer.question,
                     'answer': answer.answer,
                     'ai_analysis': answer.ai_analysis,
@@ -912,7 +912,7 @@ class InterviewEvaluationService:
                 'score': total_score,
                 'lastCompare': last_compare,
                 'summary': summary,
-                'question_analyses': question_analyses
+                'question_analysis': question_analysis
             }
             
         except Interview.DoesNotExist:
