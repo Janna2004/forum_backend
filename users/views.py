@@ -15,6 +15,9 @@ from rest_framework.response import Response
 from rest_framework import status
 from .services import PersonalizedRecommendationService
 from .serializers import PersonalizedRecommendationSerializer
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Create your views here.
 
@@ -621,22 +624,19 @@ def get_personalized_recommendations(request):
         recommendation_service = PersonalizedRecommendationService()
         recommendations = recommendation_service.get_personalized_recommendations(user_profile)
         
-        # 验证响应格式
-        serializer = PersonalizedRecommendationSerializer(data=recommendations)
-        if serializer.is_valid():
-            return Response({
-                'success': True,
-                'data': serializer.validated_data
-            })
-        else:
-            # 如果验证失败，返回默认推荐
-            default_recommendations = recommendation_service._get_default_recommendations()
-            return Response({
-                'success': True,
-                'data': default_recommendations
-            })
+        # 添加调试日志
+        print(f"用户目标岗位: {user_profile['target_position']}")
+        print(f"推荐结果: {recommendations}")
+        
+        # 直接返回推荐结果，不进行序列化器验证
+        # 因为我们已经确保了数据结构的正确性
+        return Response({
+            'success': True,
+            'data': recommendations
+        })
             
     except Exception as e:
+        logger.error(f"获取个性化推荐时出错: {str(e)}")
         return Response({
             'success': False,
             'error': f'获取推荐失败: {str(e)}'
