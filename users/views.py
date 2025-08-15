@@ -135,15 +135,28 @@ def update_user_profile(request):
             user.avatar = data['avatar']
             
         # 更新目标岗位信息
-        target_position = data.get('target_position')
-        if target_position:
-            user.target_position_id = target_position.get('job_position_id')
-            user.target_position_name = target_position.get('position_name')
-            user.target_company_name = target_position.get('company_name')
-            expected_salary = target_position.get('expected_salary')
-            if expected_salary and len(expected_salary) == 2:
-                user.target_salary_min = expected_salary[0]
-                user.target_salary_max = expected_salary[1]
+        # 处理前端发送的格式：expected_position_id 和 expected_salary
+        expected_position_id = data.get('expected_position_id')
+        expected_salary = data.get('expected_salary')
+        
+        if expected_position_id is not None:
+            user.target_position_id = expected_position_id
+            
+            # 根据position_id获取岗位信息
+            try:
+                from positions.models import NowCoderPosition
+                position = NowCoderPosition.objects.get(id=expected_position_id)
+                user.target_position_name = position.job_name
+                user.target_company_name = position.company
+            except NowCoderPosition.DoesNotExist:
+                # 如果找不到岗位信息，清空相关字段
+                user.target_position_name = None
+                user.target_company_name = None
+        
+        # 处理薪资信息
+        if expected_salary and len(expected_salary) == 2:
+            user.target_salary_min = expected_salary[0]
+            user.target_salary_max = expected_salary[1]
         
         user.save()
         

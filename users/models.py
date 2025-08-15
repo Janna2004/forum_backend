@@ -23,14 +23,14 @@ class User(AbstractUser):
     @property
     def target_position(self):
         """获取目标岗位信息"""
-        if not self.target_position_id:
+        if self.target_position_id is None:
             return None
             
         return {
             'job_position_id': self.target_position_id,
             'position_name': self.target_position_name,
             'company_name': self.target_company_name,
-            'expected_salary': [self.target_salary_min, self.target_salary_max] if self.target_salary_min and self.target_salary_max else None
+            'expected_salary': [self.target_salary_min, self.target_salary_max] if self.target_salary_min is not None and self.target_salary_max is not None else None
         }
 
 class Resume(models.Model):
