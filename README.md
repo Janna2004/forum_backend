@@ -95,6 +95,7 @@ python manage.py runserver
 ```bash
 python manage.py init_knowledge_base
 python manage.py import_nowcoder_data
+python manage.py init_problem_banks
 cd crawler/interview_experience
 python crawler_integrated.py
 ```
