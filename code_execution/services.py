@@ -438,8 +438,8 @@ class CodeEvaluationService:
             if not test_cases:
                 return {'error': '题目没有测试用例'}
             
-            # 创建临时文件
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            # 创建临时文件，指定UTF-8编码
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
                 # 写入代码模板和用户代码
                 code_template = problem.algorithm_code_template or ""
                 full_code = f"{code_template}\n{source_code}\n"
@@ -490,23 +490,25 @@ class CodeEvaluationService:
     def _run_single_test_case(self, code_file: str, test_case: Dict) -> Dict[str, Any]:
         """运行单个测试用例"""
         try:
-            # 构建测试输入
+            # 构建测试输入 - 注意字段名是 expectedOutput 而不是 output
             input_data = test_case.get('input', '')
-            expected_output = test_case.get('output', '')
+            expected_output = test_case.get('expectedOutput', '')  # 修正字段名
             
             # 运行代码
             result = subprocess.run(
                 ['python', code_file],
-                input=input_data.encode(),
+                input=input_data.encode('utf-8'),
                 capture_output=True,
                 timeout=5  # 5秒超时
             )
             
-            actual_output = result.stdout.decode().strip()
-            error_output = result.stderr.decode().strip()
+            actual_output = result.stdout.decode('utf-8').strip()
+            error_output = result.stderr.decode('utf-8').strip()
             
-            # 判断是否通过
-            passed = actual_output == expected_output
+            # 判断是否通过：有错误或输出不匹配都算失败
+            passed = False
+            if not error_output and actual_output == expected_output:
+                passed = True
             
             return {
                 'input': input_data,
@@ -519,7 +521,7 @@ class CodeEvaluationService:
         except subprocess.TimeoutExpired:
             return {
                 'input': test_case.get('input', ''),
-                'expected': test_case.get('output', ''),
+                'expected': test_case.get('expectedOutput', ''),  # 修正字段名
                 'actual': '',
                 'error': '执行超时',
                 'passed': False
@@ -527,7 +529,7 @@ class CodeEvaluationService:
         except Exception as e:
             return {
                 'input': test_case.get('input', ''),
-                'expected': test_case.get('output', ''),
+                'expected': test_case.get('expectedOutput', ''),  # 修正字段名
                 'actual': '',
                 'error': f'执行错误: {str(e)}',
                 'passed': False
@@ -689,4 +691,127 @@ class CodeEvaluationService:
                 'strengths': '',
                 'problems': '',
                 'suggestions': ''
+            }
+    
+    def get_code_hint(self, problem: Problem, current_code: str, language: str) -> Dict[str, Any]:
+        """获取代码提示"""
+        try:
+            # 获取第一个测试用例
+            test_case_info = ""
+            if problem.algorithm_test_cases:
+                # 确保 test_cases 是列表
+                if isinstance(problem.algorithm_test_cases, str):
+                    import json
+                    try:
+                        test_cases = json.loads(problem.algorithm_test_cases)
+                    except json.JSONDecodeError:
+                        test_cases = []
+                else:
+                    test_cases = problem.algorithm_test_cases
+                
+                # 获取第一个公开测试用例
+                if isinstance(test_cases, list):
+                    public_cases = [case for case in test_cases if isinstance(case, dict) and case.get('type') == 'public']
+                    if public_cases:
+                        first_case = public_cases[0]
+                        input_data = first_case.get('input', '')
+                        expected_output = first_case.get('expectedOutput', '')
+                        test_case_info = f"""
+示例测试用例：
+输入：{input_data}
+期望输出：{expected_output}
+"""
+            
+            # 构建代码提示提示词
+            prompt = f"""
+你是一个专业的编程导师，请根据以下信息为编程题目提供代码提示：
+
+题目信息：
+- 标题：{problem.title}
+- 描述：{problem.description}
+- 问题：{problem.question}
+- 编程语言：{language}
+
+{test_case_info}
+
+当前代码：
+{current_code}
+
+请提供以下格式的代码提示：
+
+【代码建议】
+请给出完整的代码框架，包括：
+1. 标准输入输出处理（Leetcode风格）
+2. 主函数结构
+3. 核心算法实现（预留关键逻辑部分）
+4. 确保代码可以直接在Judge0在线评测系统运行
+5. 不要包含任何中文注释，使用英文注释
+6. 根据测试用例的输入输出格式进行实现
+
+【讲解思路】
+请详细说明：
+1. 解题思路和算法选择
+2. 如何处理输入输出
+3. 关键实现步骤
+4. 需要注意的边界情况
+5. 时间复杂度分析
+
+请确保代码建议是完整可运行的框架，学生只需要填充核心逻辑部分。
+"""
+
+            # 调用AI获取代码提示
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    response = self.kb_service.spark_service._send_message(prompt)
+                    if response:
+                        # 解析代码提示结果
+                        result = self._parse_code_hint_response(response)
+                        return {
+                            'success': True,
+                            'data': result
+                        }
+                    else:
+                        logger.warning(f"代码提示返回空响应，尝试次数: {attempt + 1}")
+                        
+                except Exception as e:
+                    logger.warning(f"代码提示失败，尝试次数: {attempt + 1}, 错误: {str(e)}")
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(1)
+                    continue
+            
+            return {
+                'success': False,
+                'error': '代码提示服务暂时不可用'
+            }
+            
+        except Exception as e:
+            logger.error(f"获取代码提示失败: {str(e)}")
+            return {
+                'success': False,
+                'error': f'获取代码提示失败: {str(e)}'
+            }
+
+    def _parse_code_hint_response(self, response: str) -> Dict[str, Any]:
+        """解析代码提示响应"""
+        try:
+            # 提取代码建议
+            code_suggestion_match = re.search(r'【代码建议】\n(.*?)(?=\n【|$)', response, re.DOTALL)
+            code_suggestion = code_suggestion_match.group(1).strip() if code_suggestion_match else ''
+            
+            # 提取讲解思路
+            analysis_match = re.search(r'【讲解思路】\n(.*?)(?=\n【|$)', response, re.DOTALL)
+            analysis = analysis_match.group(1).strip() if analysis_match else ''
+            
+            return {
+                'code_suggestion': code_suggestion,
+                'analysis': analysis
+            }
+            
+        except Exception as e:
+            logger.error(f"解析代码提示响应失败: {str(e)}")
+            return {
+                'code_suggestion': '',
+                'analysis': '解析失败'
             }

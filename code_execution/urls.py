@@ -9,7 +9,8 @@ from .views import (
     submit_answers,
     get_submission_history,
     get_submission_detail,
-    evaluate_code_answers
+    evaluate_code_answers,
+    get_code_hint
 )
 
 urlpatterns = [
@@ -30,4 +31,7 @@ urlpatterns = [
     
     # 代码题答案评析接口
     path('evaluate-code/', evaluate_code_answers, name='evaluate_code_answers'),
+    
+    # 代码提示接口
+    path('code-hint/', get_code_hint, name='get_code_hint'),
 ]

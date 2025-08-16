@@ -43,11 +43,23 @@ class RunCodeView(APIView):
                 "stdin": stdin
             }
 
-            logger.info(f"提交代码执行请求: language_id={language_id}")
+            logger.info(f"提交代码执行请求: language_id={language_id}, source_code_length={len(source_code)}")
 
             # 创建提交任务
             res = requests.post(submission_url, json=payload, headers=headers, timeout=30)
-            res.raise_for_status()  # 检查请求是否成功
+            
+            # 详细记录响应信息
+            logger.info(f"Judge0 API 响应状态码: {res.status_code}")
+            logger.info(f"Judge0 API 响应头: {dict(res.headers)}")
+            
+            # Judge0 API 成功创建提交时返回 201，这是正常的
+            if res.status_code not in [200, 201]:
+                logger.error(f"Judge0 API 错误响应: {res.text}")
+                return Response({
+                    "error": "代码执行服务暂时不可用", 
+                    "details": f"API返回状态码: {res.status_code}",
+                    "api_response": res.text
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
             
             response_data = res.json()
             token = response_data.get("token")
@@ -56,13 +68,24 @@ class RunCodeView(APIView):
                 logger.error(f"API响应中没有token: {response_data}")
                 return Response({"error": "API响应格式错误"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+            # 等待一段时间让代码执行完成
+            import time
+            time.sleep(2)
+
             # 查询运行结果
             result_url = f"{submission_url}/{token}"
             result_res = requests.get(result_url, headers=headers, timeout=30)
-            result_res.raise_for_status()  # 检查请求是否成功
+            
+            if result_res.status_code != 200:
+                logger.error(f"获取执行结果失败: {result_res.status_code}, {result_res.text}")
+                return Response({
+                    "error": "获取执行结果失败",
+                    "details": f"状态码: {result_res.status_code}"
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
             result = result_res.json()
 
-            logger.info(f"代码执行完成: token={token}")
+            logger.info(f"代码执行完成: token={token}, status={result.get('status', {}).get('id')}")
             return Response(result)
             
         except requests.exceptions.Timeout:
@@ -538,4 +561,55 @@ def evaluate_code_answers(request):
         return Response({
             'success': False,
             'error': f'评析失败: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def get_code_hint(request):
+    """代码提示接口"""
+    try:
+        # 验证请求数据
+        problem_id = request.data.get('problem_id', '')
+        current_code = request.data.get('current_code', '')
+        language = request.data.get('language', 'Python')
+        
+        if not problem_id:
+            return Response({
+                'success': False,
+                'error': '缺少必需参数: problem_id'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 获取题目信息
+        try:
+            problem = Problem.objects.get(id=problem_id)
+        except Problem.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': '题目不存在'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # 调用代码提示服务
+        code_evaluation_service = CodeEvaluationService()
+        result = code_evaluation_service.get_code_hint(
+            problem, 
+            current_code, 
+            language
+        )
+        
+        if result['success']:
+            return Response({
+                'success': True,
+                'data': result['data']
+            })
+        else:
+            return Response({
+                'success': False,
+                'error': result['error']
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    except Exception as e:
+        logger.error(f"代码提示接口出错: {str(e)}")
+        return Response({
+            'success': False,
+            'error': f'获取代码提示失败: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
