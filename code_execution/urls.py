@@ -8,7 +8,8 @@ from .views import (
     search_problems,
     submit_answers,
     get_submission_history,
-    get_submission_detail
+    get_submission_detail,
+    evaluate_code_answers
 )
 
 urlpatterns = [
@@ -26,4 +27,7 @@ urlpatterns = [
     path('problem-banks/<str:problem_set_id>/submit/', submit_answers, name='submit_answers'),
     path('submissions/', get_submission_history, name='submission_history'),
     path('submissions/<int:submission_id>/', get_submission_detail, name='submission_detail'),
+    
+    # 代码题答案评析接口
+    path('evaluate-code/', evaluate_code_answers, name='evaluate_code_answers'),
 ]

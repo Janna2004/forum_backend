@@ -10,7 +10,7 @@ from rest_framework.decorators import api_view, permission_classes
 from django.db.models import Q
 from .models import ProblemBank, Problem, ProblemSubmission, ProblemAnswer
 from .serializers import ProblemBankSerializer, ProblemSerializer, ProblemSubmissionSerializer, SubmitAnswersSerializer
-from .services import ProblemEvaluationService
+from .services import ProblemEvaluationService, CodeEvaluationService
 
 logger = logging.getLogger(__name__)
 
@@ -483,4 +483,59 @@ def get_submission_detail(request, submission_id):
         return Response({
             'success': False,
             'error': '获取答题详情失败'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def evaluate_code_answers(request):
+    """代码题答案评析接口"""
+    try:
+        # 验证请求数据
+        problem_answers = request.data.get('problem_answers', [])
+        if not problem_answers:
+            return Response({
+                'success': False,
+                'error': '缺少必需参数: problem_answers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 验证每个答案的格式
+        for answer in problem_answers:
+            if not isinstance(answer, dict):
+                return Response({
+                    'success': False,
+                    'error': 'problem_answers 格式错误，应为字典列表'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if 'problem_id' not in answer or 'source_code' not in answer:
+                return Response({
+                    'success': False,
+                    'error': '每个答案必须包含 problem_id 和 source_code'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if not answer['problem_id'] or not answer['source_code']:
+                return Response({
+                    'success': False,
+                    'error': 'problem_id 和 source_code 不能为空'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 调用评析服务
+        code_evaluation_service = CodeEvaluationService()
+        result = code_evaluation_service.evaluate_code_answers(problem_answers)
+        
+        if result['success']:
+            return Response({
+                'success': True,
+                'data': result['results']
+            })
+        else:
+            return Response({
+                'success': False,
+                'error': result['error']
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    except Exception as e:
+        logger.error(f"代码评析接口出错: {str(e)}")
+        return Response({
+            'success': False,
+            'error': f'评析失败: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
