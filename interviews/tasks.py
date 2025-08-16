@@ -61,6 +61,7 @@ def analyze_interview_answer(answer_id, av_path=None, audio_path=None, has_audio
 
 问题涉及的知识点：{knowledge_points_str}
 面试问题：{answer.question}
+应答内容：{answer.answer}
 按照STAR结构（情境（Situation）、任务（Task）、行动（Action）和结果）给出当前问题的回答建议，不超过五十字。
 
 请按以下格式输出：

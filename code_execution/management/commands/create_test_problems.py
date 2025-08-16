@@ -77,17 +77,29 @@ class Command(BaseCommand):
                         {
                             'id': 4,
                             'name': '隐藏测试用例 1',
-                            'status': 'pending'
+                            'input': '[1,2,3,4,5,6,7,8,9,10]\n15',
+                            'expectedOutput': '[4,9]',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
                         },
                         {
                             'id': 5,
                             'name': '隐藏测试用例 2',
-                            'status': 'pending'
+                            'input': '[0,0,0,0,0,0,0,0,0,0]\n0',
+                            'expectedOutput': '[0,1]',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
                         },
                         {
                             'id': 6,
                             'name': '隐藏测试用例 3',
-                            'status': 'pending'
+                            'input': '[1000000000,999999999,999999998,999999997,999999996]\n1999999999',
+                            'expectedOutput': '[0,1]',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
                         }
                     ]
                 },
@@ -116,6 +128,239 @@ def twoSum(nums, target):
         
         if created:
             self.stdout.write(f'创建算法题: {algorithm_problem.title}')
+        
+        # 创建第二道算法题：反转链表
+        linked_list_problem, created = Problem.objects.get_or_create(
+            id='algo-002',
+            defaults={
+                'problem_set': algorithm_bank,
+                'category': '算法设计',
+                'title': '反转链表',
+                'description': '给你单链表的头节点 head，请你反转链表，并返回反转后的链表。',
+                'scenario': '链表操作中的经典问题',
+                'difficulty': 'Easy',
+                'tags': ['链表', '双指针'],
+                'is_algorithm': True,
+                'question': '请实现一个函数，将给定的单链表进行反转。',
+                'reference_answer': '使用迭代或递归方法，时间复杂度O(n)，空间复杂度O(1)',
+                'analysis': '这是链表操作的基础题目，考察对链表结构的理解',
+                'algorithm_constraints': {
+                    'time_complexity': 'O(n)',
+                    'space_complexity': 'O(1)',
+                    'list_length': '0 <= 节点数 <= 5000',
+                    'node_value': '-5000 <= Node.val <= 5000'
+                },
+                'algorithm_test_cases': {
+                    'public': [
+                        {
+                            'id': 1,
+                            'name': '示例 1',
+                            'input': '[1,2,3,4,5]',
+                            'expectedOutput': '[5,4,3,2,1]',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        },
+                        {
+                            'id': 2,
+                            'name': '示例 2',
+                            'input': '[1,2]',
+                            'expectedOutput': '[2,1]',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        },
+                        {
+                            'id': 3,
+                            'name': '示例 3',
+                            'input': '[]',
+                            'expectedOutput': '[]',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        }
+                    ],
+                    'hidden': [
+                        {
+                            'id': 4,
+                            'name': '隐藏测试用例 1',
+                            'input': '[10,20,30,40,50,60,70,80,90,100]',
+                            'expectedOutput': '[100,90,80,70,60,50,40,30,20,10]',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        },
+                        {
+                            'id': 5,
+                            'name': '隐藏测试用例 2',
+                            'input': '[1]',
+                            'expectedOutput': '[1]',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        },
+                        {
+                            'id': 6,
+                            'name': '隐藏测试用例 3',
+                            'input': '[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]',
+                            'expectedOutput': '[15,14,13,12,11,10,9,8,7,6,5,4,3,2,1]',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        }
+                    ]
+                },
+                'algorithm_solution': '''
+class ListNode:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+
+def reverseList(head):
+    """
+    反转链表 - 迭代方法
+    时间复杂度: O(n)
+    空间复杂度: O(1)
+    """
+    prev = None
+    curr = head
+    
+    while curr is not None:
+        next_temp = curr.next
+        curr.next = prev
+        prev = curr
+        curr = next_temp
+    
+    return prev
+                ''',
+                'algorithm_code_template': '''
+class ListNode:
+    def __init__(self, val=0, next=None):
+        self.val = val
+        self.next = next
+
+def reverseList(head):
+    # 在这里实现你的解决方案
+    pass
+                '''
+            }
+        )
+        
+        if created:
+            self.stdout.write(f'创建算法题: {linked_list_problem.title}')
+        
+        # 创建第三道算法题：有效的括号
+        parentheses_problem, created = Problem.objects.get_or_create(
+            id='algo-003',
+            defaults={
+                'problem_set': algorithm_bank,
+                'category': '算法设计',
+                'title': '有效的括号',
+                'description': '给定一个只包括 \'(\'，\')\'，\'{\'，\'}\'，\'[\'，\']\' 的字符串 s，判断字符串是否有效。',
+                'scenario': '栈的经典应用场景',
+                'difficulty': 'Easy',
+                'tags': ['栈', '字符串'],
+                'is_algorithm': True,
+                'question': '请实现一个函数，判断给定的括号字符串是否有效。',
+                'reference_answer': '使用栈来匹配括号，时间复杂度O(n)，空间复杂度O(n)',
+                'analysis': '这是栈数据结构的典型应用，考察对栈的理解和使用',
+                'algorithm_constraints': {
+                    'time_complexity': 'O(n)',
+                    'space_complexity': 'O(n)',
+                    'string_length': '1 <= s.length <= 10^4',
+                    'characters': 's 仅由括号 \'()[]{}\' 组成'
+                },
+                'algorithm_test_cases': {
+                    'public': [
+                        {
+                            'id': 1,
+                            'name': '示例 1',
+                            'input': '"()"',
+                            'expectedOutput': 'true',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        },
+                        {
+                            'id': 2,
+                            'name': '示例 2',
+                            'input': '"()[]{}"',
+                            'expectedOutput': 'true',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        },
+                        {
+                            'id': 3,
+                            'name': '示例 3',
+                            'input': '"(]"',
+                            'expectedOutput': 'false',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        }
+                    ],
+                    'hidden': [
+                        {
+                            'id': 4,
+                            'name': '隐藏测试用例 1',
+                            'input': '"((()))"',
+                            'expectedOutput': 'true',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        },
+                        {
+                            'id': 5,
+                            'name': '隐藏测试用例 2',
+                            'input': '"([)]"',
+                            'expectedOutput': 'false',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        },
+                        {
+                            'id': 6,
+                            'name': '隐藏测试用例 3',
+                            'input': '"({[]})"',
+                            'expectedOutput': 'true',
+                            'status': 'pending',
+                            'actualOutput': '',
+                            'error': ''
+                        }
+                    ]
+                },
+                'algorithm_solution': '''
+def isValid(s):
+    """
+    判断括号是否有效
+    时间复杂度: O(n)
+    空间复杂度: O(n)
+    """
+    stack = []
+    bracket_map = {')': '(', '}': '{', ']': '['}
+    
+    for char in s:
+        if char in bracket_map.values():
+            # 左括号入栈
+            stack.append(char)
+        elif char in bracket_map.keys():
+            # 右括号检查匹配
+            if not stack or stack.pop() != bracket_map[char]:
+                return False
+    
+    return len(stack) == 0
+                ''',
+                'algorithm_code_template': '''
+def isValid(s):
+    # 在这里实现你的解决方案
+    pass
+                '''
+            }
+        )
+        
+        if created:
+            self.stdout.write(f'创建算法题: {parentheses_problem.title}')
         
         # 创建非算法题库
         non_algorithm_bank, created = ProblemBank.objects.get_or_create(

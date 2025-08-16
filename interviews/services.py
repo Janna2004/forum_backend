@@ -205,7 +205,7 @@ class XunfeiTranscriptionService:
         self.APPID = settings.XUNFEI_APP_ID
         self.Algorithm = "hmac-sha256"
         self.HttpProto = "HTTP/1.1"
-        self.UserName = settings.XUNFEI_ASR_API_KEY
+        self.UserName = settings.XUNFEI_API_KEY
         self.Secret = settings.XUNFEI_API_SECRET
         
         # 业务参数
@@ -386,7 +386,8 @@ class XunfeiASRService:
         md5 = bytes(md5, encoding='utf-8')
         signa = hmac.new(self.secret_key.encode('utf-8'), md5, hashlib.sha1).digest()
         signa = base64.b64encode(signa)
-        return str(signa, 'utf-8')
+        signa_str = str(signa, 'utf-8')
+        return signa_str
 
     def upload(self):
         file_len = os.path.getsize(self.file_path)
@@ -439,7 +440,7 @@ class XunfeiASRService:
                 headers={"Content-type": "application/json"}
             )
             result = json.loads(response.text)
-            print(f"[调试] 查询result: {result}")
+            # print(f"[调试] 查询result: {result}")
             status = result['content']['orderInfo']['status']
             if status == 4:
                 break
@@ -502,7 +503,7 @@ class FileUploadService:
         self.file_piece_size = 5242880  # 5MB
         
         self.app_id = settings.XUNFEI_APP_ID
-        self.api_key = settings.XUNFEI_ASR_API_KEY
+        self.api_key = settings.XUNFEI_API_KEY
         self.api_secret = settings.XUNFEI_API_SECRET
         self.request_id = self.get_request_id()
         self.cloud_id = '0'
