@@ -96,6 +96,8 @@ python manage.py runserver
 python manage.py init_knowledge_base
 python manage.py import_nowcoder_data
 python manage.py init_problem_banks
+python manage.py create_test_problems
+python manage.py update_problem_counts
 cd crawler/interview_experience
 python crawler_integrated.py
 ```
