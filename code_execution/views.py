@@ -29,74 +29,133 @@ class RunCodeView(APIView):
             
             stdin = request.data.get("stdin", "")
 
-            submission_url = "https://judge0-ce.p.rapidapi.com/submissions"
+            logger.info(f"本地代码执行请求: language_id={language_id}, source_code_length={len(source_code)}")
 
-            headers = {
-                "x-rapidapi-host": "judge0-ce.p.rapidapi.com",
-                "x-rapidapi-key": "76720345bfmsha48b5d6bd12c910p1a4946jsn87edb9d8e75d",  # 用户提供的RapidAPI密钥
-                "content-type": "application/json"
-            }
-
-            payload = {
-                "source_code": source_code,
-                "language_id": language_id,
-                "stdin": stdin
-            }
-
-            logger.info(f"提交代码执行请求: language_id={language_id}, source_code_length={len(source_code)}")
-
-            # 创建提交任务
-            res = requests.post(submission_url, json=payload, headers=headers, timeout=30)
+            # 直接使用本地执行
+            return self._execute_locally(source_code, language_id, stdin)
             
-            # 详细记录响应信息
-            logger.info(f"Judge0 API 响应状态码: {res.status_code}")
-            logger.info(f"Judge0 API 响应头: {dict(res.headers)}")
-            
-            # Judge0 API 成功创建提交时返回 201，这是正常的
-            if res.status_code not in [200, 201]:
-                logger.error(f"Judge0 API 错误响应: {res.text}")
-                return Response({
-                    "error": "代码执行服务暂时不可用", 
-                    "details": f"API返回状态码: {res.status_code}",
-                    "api_response": res.text
-                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-            
-            response_data = res.json()
-            token = response_data.get("token")
-            
-            if not token:
-                logger.error(f"API响应中没有token: {response_data}")
-                return Response({"error": "API响应格式错误"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-            # 等待一段时间让代码执行完成
-            import time
-            time.sleep(2)
-
-            # 查询运行结果
-            result_url = f"{submission_url}/{token}"
-            result_res = requests.get(result_url, headers=headers, timeout=30)
-            
-            if result_res.status_code != 200:
-                logger.error(f"获取执行结果失败: {result_res.status_code}, {result_res.text}")
-                return Response({
-                    "error": "获取执行结果失败",
-                    "details": f"状态码: {result_res.status_code}"
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                
-            result = result_res.json()
-
-            logger.info(f"代码执行完成: token={token}, status={result.get('status', {}).get('id')}")
-            return Response(result)
-            
-        except requests.exceptions.Timeout:
-            logger.error("请求超时")
-            return Response({"error": "请求超时，请稍后重试"}, status=status.HTTP_504_GATEWAY_TIMEOUT)
-        except requests.exceptions.RequestException as e:
-            logger.error(f"请求失败: {str(e)}")
-            return Response({"error": "请求失败", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
-            logger.error(f"未知错误: {str(e)}")
-            return Response({"error": "发生未知错误", "details": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.error(f"代码执行时发生错误: {str(e)}")
+            return Response({
+                "error": "代码执行失败", 
+                "details": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _execute_locally(self, source_code, language_id, stdin):
+        """本地执行代码"""
+        import subprocess
+        import tempfile
+        import os
+        import time
+        
+        try:
+            # 根据语言ID确定文件扩展名和执行命令
+            language_config = {
+                71: {"ext": ".py", "cmd": "python", "name": "Python"},  # Python
+                63: {"ext": ".js", "cmd": "node", "name": "JavaScript"},  # JavaScript
+                54: {"ext": ".cpp", "cmd": "g++", "name": "C++"},  # C++
+                50: {"ext": ".c", "cmd": "gcc", "name": "C"},  # C
+                62: {"ext": ".java", "cmd": "java", "name": "Java"},  # Java
+            }
+            
+            if language_id not in language_config:
+                return Response({
+                    "error": "不支持的语言",
+                    "details": f"语言ID {language_id} 不支持本地执行"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            config = language_config[language_id]
+            
+            # 创建临时文件
+            with tempfile.NamedTemporaryFile(mode='w', suffix=config["ext"], delete=False, encoding='utf-8') as f:
+                f.write(source_code)
+                temp_file = f.name
+            
+            try:
+                # 执行代码
+                start_time = time.time()
+                
+                if language_id == 62:  # Java 特殊处理
+                    # 编译 Java 文件
+                    compile_result = subprocess.run(
+                        ["javac", temp_file], 
+                        capture_output=True, 
+                        text=True, 
+                        timeout=10
+                    )
+                    
+                    if compile_result.returncode != 0:
+                        return Response({
+                            "status": {"id": 4, "description": "Compilation Error"},
+                            "stdout": "",
+                            "stderr": compile_result.stderr,
+                            "time": int((time.time() - start_time) * 1000),
+                            "memory": 0
+                        })
+                    
+                    # 执行编译后的类文件
+                    class_name = os.path.splitext(os.path.basename(temp_file))[0]
+                    class_dir = os.path.dirname(temp_file)
+                    
+                    result = subprocess.run(
+                        [config["cmd"], "-cp", class_dir, class_name],
+                        input=stdin,
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                else:
+                    # 其他语言直接执行
+                    result = subprocess.run(
+                        [config["cmd"], temp_file],
+                        input=stdin,
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                
+                execution_time = int((time.time() - start_time) * 1000)
+                
+                # 构建响应（保持与Judge0相同的格式）
+                status_id = 3 if result.returncode == 0 else 4
+                status_description = "Accepted" if result.returncode == 0 else "Runtime Error"
+                
+                response_data = {
+                    "status": {
+                        "id": status_id,
+                        "description": status_description
+                    },
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "time": execution_time,
+                    "memory": 0  # 本地执行无法准确获取内存使用
+                }
+                
+                logger.info(f"本地代码执行成功: {config['name']}, 耗时: {execution_time}ms")
+                return Response(response_data)
+                
+            finally:
+                # 清理临时文件
+                try:
+                    os.unlink(temp_file)
+                    if language_id == 62:  # Java 还需要清理 .class 文件
+                        class_file = os.path.splitext(temp_file)[0] + ".class"
+                        if os.path.exists(class_file):
+                            os.unlink(class_file)
+                except:
+                    pass
+                    
+        except subprocess.TimeoutExpired:
+            return Response({
+                "error": "代码执行超时",
+                "details": "本地执行超时（10秒）"
+            }, status=status.HTTP_504_GATEWAY_TIMEOUT)
+        except Exception as e:
+            logger.error(f"本地代码执行失败: {str(e)}")
+            return Response({
+                "error": "本地代码执行失败",
+                "details": str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ProblemBankListView(generics.ListAPIView):
     """获取题库列表接口"""
