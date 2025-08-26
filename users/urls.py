@@ -4,7 +4,7 @@ from .views import (
     get_resume, create_or_update_resume, manage_work_experience,
     manage_project_experience, manage_education_experience, manage_custom_section,
     delete_work_experience, delete_project_experience, delete_education_experience, delete_custom_section,
-    get_user_resumes, get_personalized_recommendations
+    get_user_resumes, get_personalized_recommendations, apply_resume_optimization
 )
 
 urlpatterns = [
@@ -19,6 +19,7 @@ urlpatterns = [
     path('resume/', get_resume, name='get_resume'),
     path('resume/list/', get_user_resumes, name='get_user_resumes'),  # 获取用户所有简历
     path('resume/create/', create_or_update_resume, name='create_or_update_resume'),
+    path('resume/optimize/apply/', apply_resume_optimization, name='apply_resume_optimization'),
     
     # 工作经历管理
     path('resume/work/', manage_work_experience, name='manage_work_experience'),

@@ -3,26 +3,10 @@ import logging
 import cv2
 import numpy as np
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
-from aiortc.contrib.media import MediaPlayer, MediaRecorder
-from av import VideoFrame
-import base64
-import json
 from typing import Dict, Optional, List
 from .models import VideoStream, WebRTCConnection, VideoFrame as VideoFrameModel
 from websocket import create_connection, WebSocketConnectionClosedException
 
-import base64
-import hashlib
-import hmac
-import json
-import threading
-import time
-from datetime import datetime
-from urllib.parse import urlencode
-import websocket
-from urllib.parse import quote
-
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 

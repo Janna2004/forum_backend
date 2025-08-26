@@ -16,8 +16,126 @@ from rest_framework import status
 from .services import PersonalizedRecommendationService
 from .serializers import PersonalizedRecommendationSerializer
 import logging
+import redis
 
 logger = logging.getLogger(__name__)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def apply_resume_optimization(request):
+    """应用/弃用 AI 简历优化建议。
+    请求体: {"resume_id": 123, "apply": true}
+    - apply=true: 从Redis读取结构化建议，应用到对应的数据库字段，清理缓存
+    - apply=false: 仅清理缓存
+    """
+    try:
+        user = request.user
+        data = json.loads(request.body.decode())
+        resume_id = data.get('resume_id')
+        apply_flag = data.get('apply')
+
+        if resume_id is None:
+            return JsonResponse({'error': '缺少resume_id参数'}, status=400)
+        if apply_flag is None:
+            return JsonResponse({'error': '缺少apply参数'}, status=400)
+
+        # 权限校验：必须是自己的简历
+        try:
+            resume = Resume.objects.get(id=resume_id, user=user)
+        except Resume.DoesNotExist:
+            return JsonResponse({'error': '简历不存在或无权访问'}, status=404)
+
+        # 连接Redis
+        client = redis.from_url(getattr(settings, 'CELERY_BROKER_URL', 'redis://localhost:6379/0'))
+        json_key = f"resume:opt_suggestion:json:{user.id}:{resume_id}"
+
+        if bool(apply_flag):
+            # 读取结构化建议
+            structured_suggestion = client.get(json_key)
+            if structured_suggestion:
+                try:
+                    if isinstance(structured_suggestion, bytes):
+                        structured_suggestion = structured_suggestion.decode('utf-8', errors='ignore')
+                    
+                    suggestions = json.loads(structured_suggestion)
+                    applied_changes = []
+                    
+                    # 应用基本信息优化
+                    if 'basic_info' in suggestions:
+                        basic_info = suggestions['basic_info']
+                        if 'name' in basic_info and basic_info['name'] != resume.name:
+                            resume.name = basic_info['name']
+                            applied_changes.append(f"姓名更新为: {basic_info['name']}")
+                        if 'expected_position' in basic_info and basic_info['expected_position'] != resume.expected_position:
+                            resume.expected_position = basic_info['expected_position']
+                            applied_changes.append(f"期望职位更新为: {basic_info['expected_position']}")
+                        resume.save()
+                    
+                    # 应用工作经历优化
+                    if 'work_experiences' in suggestions:
+                        for work_suggestion in suggestions['work_experiences']:
+                            try:
+                                work_exp = WorkExperience.objects.get(id=work_suggestion['id'], resume=resume)
+                                for field in ['company_name', 'position', 'work_content']:
+                                    if field in work_suggestion and work_suggestion[field] != getattr(work_exp, field):
+                                        setattr(work_exp, field, work_suggestion[field])
+                                        applied_changes.append(f"工作经历{work_exp.id}的{field}已更新")
+                                work_exp.save()
+                            except WorkExperience.DoesNotExist:
+                                continue
+                    
+                    # 应用项目经历优化
+                    if 'project_experiences' in suggestions:
+                        for project_suggestion in suggestions['project_experiences']:
+                            try:
+                                project_exp = ProjectExperience.objects.get(id=project_suggestion['id'], resume=resume)
+                                for field in ['project_name', 'project_role', 'project_content']:
+                                    if field in project_suggestion and project_suggestion[field] != getattr(project_exp, field):
+                                        setattr(project_exp, field, project_suggestion[field])
+                                        applied_changes.append(f"项目经历{project_exp.id}的{field}已更新")
+                                project_exp.save()
+                            except ProjectExperience.DoesNotExist:
+                                continue
+                    
+                    # 应用教育经历优化
+                    if 'education_experiences' in suggestions:
+                        for edu_suggestion in suggestions['education_experiences']:
+                            try:
+                                edu_exp = EducationExperience.objects.get(id=edu_suggestion['id'], resume=resume)
+                                if 'school_experience' in edu_suggestion and edu_suggestion['school_experience'] != edu_exp.school_experience:
+                                    edu_exp.school_experience = edu_suggestion['school_experience']
+                                    applied_changes.append(f"教育经历{edu_exp.id}的在校经历已更新")
+                                    edu_exp.save()
+                            except EducationExperience.DoesNotExist:
+                                continue
+                    
+                    # 清理缓存
+                    client.delete(json_key)
+                    
+                    return JsonResponse({
+                        'success': True, 
+                        'msg': '结构化优化建议已应用到简历',
+                        'applied_changes': applied_changes
+                    })
+                    
+                except json.JSONDecodeError:
+                    # 如果结构化数据解析失败，清理缓存并提示
+                    client.delete(json_key)
+                    return JsonResponse({
+                        'success': False, 
+                        'msg': '优化建议格式解析失败，无法应用'
+                    })
+            else:
+                # 没有找到结构化建议
+                return JsonResponse({'error': '未找到缓存的优化建议或已过期'}, status=404)
+        else:
+            # 丢弃建议，仅清理缓存
+            client.delete(json_key)
+            return JsonResponse({'success': True, 'msg': '已丢弃优化建议'})
+
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
 # Create your views here.
 

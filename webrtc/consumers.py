@@ -15,7 +15,6 @@ from users.models import Resume
 import threading
 import cv2
 import numpy as np
-import torch
 from torchvision import transforms
 from PIL import Image
 import sys

@@ -20,7 +20,8 @@ def get_websocket_urlpatterns():
     from webrtc.routing import websocket_urlpatterns as webrtc_patterns
     from interviews.routing import websocket_urlpatterns as interview_patterns
     from posts.routing import websocket_urlpatterns as chat_patterns
-    return webrtc_patterns + interview_patterns + chat_patterns
+    from users.routing import websocket_urlpatterns as users_patterns
+    return webrtc_patterns + interview_patterns + chat_patterns + users_patterns
 
 application = ProtocolTypeRouter({
     "http": get_asgi_application(),
